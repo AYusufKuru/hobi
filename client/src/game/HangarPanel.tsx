@@ -38,6 +38,9 @@ export type HangarLoadout = {
   fits: Record<string, ShipFit>;
   activeShipId: string;
   laserAmmo: number;
+  ammo?: Record<string, number>;
+  activeAmmoId?: string;
+  skillBar?: (string | null)[];
 };
 
 export type HangarState = {
@@ -56,6 +59,9 @@ export type HangarState = {
     equippedLasers?: number;
     shieldAbsorb?: number;
     laserAmmo: number;
+    activeAmmoId?: string;
+    ammo?: Record<string, number>;
+    skillBar?: (string | null)[];
     laserSlots?: number;
     generatorSlots?: number;
   };
@@ -109,6 +115,10 @@ const ITEM_ICON: Record<string, string> = {
   'gen-shield-2': '/assets/hangar/gen-shield.png',
   'ammo-ucb': '/assets/hangar/ammo-ucb.png',
   'ammo-rsb': '/assets/hangar/ammo-rsb.png',
+  'ammo-x1': '/assets/hangar/ammo-ucb.png',
+  'ammo-x2': '/assets/hangar/ammo-ucb.png',
+  'ammo-x3': '/assets/hangar/ammo-ucb.png',
+  'ammo-x4': '/assets/hangar/ammo-ucb.png',
 };
 
 const SIDEBAR: { id: NavId | 'disabled'; label: string }[] = [
@@ -718,26 +728,35 @@ export default function HangarPanel({
                   </div>
 
                   <div className="do-inv-section">
-                    <h4>Ekstralar</h4>
+                    <h4>Cephane (skill bara sürükle)</h4>
                     <div className="do-equip-grid hangar">
-                      {catalog
-                        .filter((c) => c.category === 'ammo')
-                        .map((item) => (
+                      {(
+                        [
+                          'ammo-x1',
+                          'ammo-x2',
+                          'ammo-x3',
+                          'ammo-x4',
+                          'ammo-rsb',
+                        ] as const
+                      ).map((id) => {
+                        const n = loadout?.ammo?.[id] ?? 0;
+                        const item = catalog.find((c) => c.id === id);
+                        return (
                           <div
-                            key={item.id}
-                            className="do-slot filled static-slot"
+                            key={id}
+                            className="do-slot filled"
+                            draggable={!busy}
+                            title={`${item?.name ?? id} ×${n}`}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/ammo-id', id);
+                              e.dataTransfer.setData('text/plain', id);
+                            }}
                           >
-                            <img src={iconFor(item.id)} alt="" />
-                            <span className="stack">
-                              {stats?.laserAmmo ?? 0}
-                            </span>
+                            <img src={iconFor(id)} alt="" draggable={false} />
+                            <span className="stack">{n}</span>
                           </div>
-                        ))}
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <div key={`ex-${i}`} className="do-slot empty">
-                          <span className="empty-mark">+</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

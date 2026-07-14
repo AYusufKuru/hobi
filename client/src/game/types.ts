@@ -62,6 +62,9 @@ export interface PlayerPublic {
   kills: number;
   rockets: number;
   laserAmmo: number;
+  activeAmmoId?: string;
+  ammo?: Record<string, number>;
+  skillBar?: (string | null)[];
   shipId: string;
   shipSpeed: number;
   laserDamage: number;
@@ -85,6 +88,7 @@ export interface BulletPublic {
   x: number;
   y: number;
   kind: 'laser' | 'rocket';
+  tint?: number;
 }
 
 export interface NpcPublic {

@@ -9,6 +9,12 @@ export const WORLD = {
   bulletLifetimeMs: 1400,
   rocketLifetimeMs: 2200,
   fireCooldownMs: 500,
+  /** RSB rapid-fire interval while bursting */
+  rsbFireCooldownMs: 100,
+  /** RSB continuous fire window */
+  rsbBurstMs: 1500,
+  /** Cooldown after an RSB burst ends */
+  rsbReloadMs: 3000,
   laserDpsIntervalMs: 1000,
   rocketCooldownMs: 1000,
   laserDamage: 12,
@@ -122,6 +128,7 @@ export interface PlayerState {
   kills: number;
   rockets: number;
   laserAmmo: number;
+  activeAmmoId: string;
   shipId: string;
   shipSprite: 'ship-player' | 'ship-elite' | 'ship-goliath';
   shipSpeed: number;
@@ -149,6 +156,10 @@ export interface PlayerState {
   portalChannelId: string | null;
   /** Timestamp when channel completes */
   portalChannelEndsAt: number;
+  /** RSB burst end time (0 = not bursting) */
+  rsbBurstUntil: number;
+  /** Earliest time RSB can start again */
+  rsbReadyAt: number;
 }
 
 export interface BulletState {
@@ -171,6 +182,8 @@ export interface BulletState {
   /** Rockets deal this on reach; lasers are visual (DPS is separate) */
   damage: number;
   npcExtra: number;
+  /** Laser beam tint (0 = default) */
+  tint: number;
 }
 
 export interface NpcState {
@@ -221,13 +234,15 @@ export interface Snapshot {
       | 'lastPortalAt'
       | 'portalChannelId'
       | 'portalChannelEndsAt'
+      | 'rsbBurstUntil'
+      | 'rsbReadyAt'
       | 'loadout'
     > & { moving: boolean; inRange: boolean }
   >;
   bullets: Array<
     Pick<
       BulletState,
-      'id' | 'ownerId' | 'targetId' | 'aimX' | 'aimY' | 'frozen' | 'x' | 'y' | 'kind'
+      'id' | 'ownerId' | 'targetId' | 'aimX' | 'aimY' | 'frozen' | 'x' | 'y' | 'kind' | 'tint'
     >
   >;
   npcs: Omit<
@@ -267,6 +282,8 @@ export interface JoinResult {
     | 'lastPortalAt'
     | 'portalChannelId'
     | 'portalChannelEndsAt'
+    | 'rsbBurstUntil'
+    | 'rsbReadyAt'
     | 'loadout'
   >;
   world?: typeof WORLD;

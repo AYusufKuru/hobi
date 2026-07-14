@@ -8,13 +8,17 @@ import {
   getCatalogItem,
 } from '../hangar/catalog';
 import {
+  activeAmmoCount,
   addToDepot,
   catalogForClient,
   deriveStats,
   ensureFit,
+  getAmmoColor,
+  isSkillAmmoId,
   parseLoadout,
   takeFromDepot,
   type Loadout,
+  type SkillAmmoId,
 } from '../hangar/loadout';
 import {
   BulletState,
@@ -111,10 +115,64 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         equippedLasers: player.equippedLasers,
         shieldAbsorb: player.shieldAbsorb,
         laserAmmo: player.laserAmmo,
+        activeAmmoId: player.activeAmmoId,
+        ammo: player.loadout.ammo,
+        skillBar: player.loadout.skillBar,
         laserSlots: stats.laserSlots,
         generatorSlots: stats.generatorSlots,
       },
     };
+  }
+
+  selectAmmo(socketId: string, ammoId: string) {
+    const player = this.playerFromSocket(socketId);
+    if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
+    if (!isSkillAmmoId(ammoId)) {
+      return { ok: false as const, error: 'Geçersiz cephane' };
+    }
+    if (!player.loadout.skillBar.includes(ammoId)) {
+      return { ok: false as const, error: 'Skill barda yok' };
+    }
+    player.activeAmmoId = ammoId;
+    player.loadout.activeAmmoId = ammoId;
+    player.rsbBurstUntil = 0;
+    player.laserAmmo = activeAmmoCount(player.loadout);
+    this.applyLoadoutStats(player);
+    void this.persistPlayer(player);
+    return { ok: true as const, hangar: this.getHangarState(socketId) };
+  }
+
+  setSkillBarSlot(socketId: string, slot: number, ammoId: string | null) {
+    const player = this.playerFromSocket(socketId);
+    if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
+    const idx = Math.floor(Number(slot));
+    if (idx < 0 || idx > 4) {
+      return { ok: false as const, error: 'Geçersiz slot' };
+    }
+    if (ammoId !== null && !isSkillAmmoId(ammoId)) {
+      return { ok: false as const, error: 'Geçersiz cephane' };
+    }
+    player.loadout.skillBar[idx] = ammoId;
+    if (
+      ammoId &&
+      (!player.loadout.skillBar.includes(player.activeAmmoId as SkillAmmoId) ||
+        !player.activeAmmoId)
+    ) {
+      player.activeAmmoId = ammoId;
+      player.loadout.activeAmmoId = ammoId;
+    }
+    if (
+      !ammoId &&
+      player.activeAmmoId &&
+      !player.loadout.skillBar.includes(player.activeAmmoId as SkillAmmoId)
+    ) {
+      const next = player.loadout.skillBar.find((id) => !!id) ?? 'ammo-x1';
+      player.activeAmmoId = next;
+      player.loadout.activeAmmoId = next as SkillAmmoId;
+    }
+    this.applyLoadoutStats(player);
+    void this.persistPlayer(player);
+    return { ok: true as const, hangar: this.getHangarState(socketId) };
   }
 
   buyItem(socketId: string, itemId: string) {
@@ -142,7 +200,10 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
     if (item.category === 'ammo') {
       pay();
-      player.laserAmmo += item.ammoAdd ?? 0;
+      const add = item.ammoAdd ?? 0;
+      player.loadout.ammo[item.id] =
+        (player.loadout.ammo[item.id] ?? 0) + add;
+      player.laserAmmo = activeAmmoCount(player.loadout);
       player.loadout.laserAmmo = player.laserAmmo;
       this.applyLoadoutStats(player);
       void this.persistPlayer(player);
@@ -385,6 +446,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
             lastPortalAt,
             portalChannelId,
             portalChannelEndsAt,
+            rsbBurstUntil,
+            rsbReadyAt,
             loadout: _loadout,
             ...rest
           } = p;
@@ -398,6 +461,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           void lastPortalAt;
           void portalChannelId;
           void portalChannelEndsAt;
+          void rsbBurstUntil;
+          void rsbReadyAt;
           void _loadout;
           const aim = this.resolveTargetPos(p.targetId, p.mapId);
           const inRange = !!(
@@ -406,13 +471,15 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           );
           return {
             ...rest,
+            ammo: p.loadout.ammo,
+            skillBar: p.loadout.skillBar,
             moving: Math.hypot(vx, vy) > 12,
             inRange,
           };
         }),
       bullets: [...this.bullets.values()]
         .filter((b) => b.mapId === mapId)
-        .map(({ id, ownerId, targetId, aimX, aimY, frozen, x, y, kind }) => ({
+        .map(({ id, ownerId, targetId, aimX, aimY, frozen, x, y, kind, tint }) => ({
           id,
           ownerId,
           targetId,
@@ -422,6 +489,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           x,
           y,
           kind,
+          tint,
         })),
       npcs: [...this.npcs.values()]
         .filter((n) => n.mapId === mapId)
@@ -576,7 +644,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       gold: entity.gold ?? 25,
       kills: entity.kills,
       rockets: WORLD.startingRockets,
-      laserAmmo: loadout.laserAmmo,
+      laserAmmo: activeAmmoCount(loadout),
+      activeAmmoId: loadout.activeAmmoId,
       shipId: loadout.activeShipId,
       shipSprite: stats.sprite,
       shipSpeed: stats.speed,
@@ -598,6 +667,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       lastPortalAt: 0,
       portalChannelId: null,
       portalChannelEndsAt: 0,
+      rsbBurstUntil: 0,
+      rsbReadyAt: 0,
     };
 
     this.players.set(player.id, player);
@@ -624,6 +695,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       lastPortalAt: _p,
       portalChannelId: _pc,
       portalChannelEndsAt: _pe,
+      rsbBurstUntil: _rb,
+      rsbReadyAt: _rr,
       loadout: _l,
       ...self
     } = player;
@@ -829,16 +902,43 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       const laserDist = aim
         ? Math.hypot(aim.x - player.x, aim.y - player.y)
         : Infinity;
-      const canLaser =
+      const ammoId = player.activeAmmoId || player.loadout.activeAmmoId;
+      const ammoStock = player.loadout.ammo[ammoId] ?? 0;
+      const isRsb = ammoId === 'ammo-rsb';
+      let canLaser =
         player.firing &&
         player.equippedLasers > 0 &&
+        ammoStock > 0 &&
         !!player.targetId &&
         !!aim &&
         laserDist <= WORLD.laserRange;
 
-      if (canLaser && now - player.lastShotAt >= WORLD.fireCooldownMs) {
+      if (isRsb) {
+        if (now < player.rsbReadyAt) {
+          canLaser = false;
+        } else if (canLaser) {
+          if (player.rsbBurstUntil <= 0) {
+            player.rsbBurstUntil = now + WORLD.rsbBurstMs;
+          } else if (now >= player.rsbBurstUntil) {
+            player.rsbBurstUntil = 0;
+            player.rsbReadyAt = now + WORLD.rsbReloadMs;
+            player.firing = false;
+            input.firing = false;
+            canLaser = false;
+          }
+        }
+      } else {
+        player.rsbBurstUntil = 0;
+      }
+
+      const shotCd = isRsb ? WORLD.rsbFireCooldownMs : WORLD.fireCooldownMs;
+      const dpsCd = isRsb
+        ? WORLD.rsbFireCooldownMs
+        : WORLD.laserDpsIntervalMs;
+      const laserTint = getAmmoColor(ammoId);
+
+      if (canLaser && now - player.lastShotAt >= shotCd) {
         player.lastShotAt = now;
-        // Dual visual lasers (left + right barrels), every 0.5s
         const fireAng = Math.atan2(aim!.y - player.y, aim!.x - player.x);
         const perpX = -Math.sin(fireAng) * 9;
         const perpY = Math.cos(fireAng) * 9;
@@ -855,18 +955,21 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
             WORLD.bulletSpeed,
             0,
             player.targetId!,
+            laserTint,
           );
         }
       }
 
-      if (canLaser && now - player.lastLaserDpsAt >= WORLD.laserDpsIntervalMs) {
+      if (canLaser && now - player.lastLaserDpsAt >= dpsCd) {
         player.lastLaserDpsAt = now;
-        if (player.laserAmmo > 0) {
-          player.laserAmmo = Math.max(0, player.laserAmmo - 5);
+        const consume = isRsb ? 2 : 1;
+        const have = player.loadout.ammo[ammoId] ?? 0;
+        if (have > 0) {
+          player.loadout.ammo[ammoId] = Math.max(0, have - consume);
+          player.laserAmmo = activeAmmoCount(player.loadout);
           player.loadout.laserAmmo = player.laserAmmo;
-          if (player.laserAmmo === 0) this.applyLoadoutStats(player);
+          if (player.loadout.ammo[ammoId] === 0) this.applyLoadoutStats(player);
         }
-        // Damage applies on fire, not when the beam arrives
         this.dealLockedDamage(
           player.id,
           player.targetId!,
@@ -875,10 +978,9 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           events,
         );
       } else if (!canLaser) {
-        // Next burst starts with an immediate hit
         player.lastLaserDpsAt = Math.min(
           player.lastLaserDpsAt,
-          now - WORLD.laserDpsIntervalMs,
+          now - dpsCd,
         );
       }
 
@@ -1111,6 +1213,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       speed,
       npcExtra,
       player.targetId,
+      kind === 'laser' ? getAmmoColor(player.activeAmmoId) : 0xff8844,
     );
   }
 
@@ -1126,6 +1229,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     speed: number,
     npcExtra = 0,
     targetId: string,
+    tint = 0,
   ) {
     const fireAngle = Math.atan2(aimY - y, aimX - x);
     const id = uuid();
@@ -1145,6 +1249,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       kind,
       damage,
       npcExtra,
+      tint,
     });
   }
 
@@ -1448,12 +1553,20 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   }
 
   private toLoadout(player: PlayerState): Loadout {
-    player.loadout.laserAmmo = player.laserAmmo;
+    player.loadout.laserAmmo = activeAmmoCount(player.loadout);
+    player.loadout.activeAmmoId = isSkillAmmoId(player.activeAmmoId)
+      ? player.activeAmmoId
+      : player.loadout.activeAmmoId;
     player.loadout.activeShipId = player.shipId;
     return player.loadout;
   }
 
   private applyLoadoutStats(player: PlayerState) {
+    if (!isSkillAmmoId(player.loadout.activeAmmoId)) {
+      player.loadout.activeAmmoId = 'ammo-x1';
+    }
+    player.activeAmmoId = player.loadout.activeAmmoId;
+    player.laserAmmo = activeAmmoCount(player.loadout);
     player.loadout.laserAmmo = player.laserAmmo;
     const prevMaxShield = player.maxShield;
     const stats = deriveStats(player.loadout);
@@ -1466,7 +1579,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     player.equippedLasers = stats.equippedLasers;
     player.shieldAbsorb = stats.shieldAbsorb;
     player.shipSprite = stats.sprite;
-    player.laserAmmo = player.loadout.laserAmmo;
     player.hp = Math.min(player.hp, player.maxHp);
     if (stats.maxShield > prevMaxShield) {
       player.shield += stats.maxShield - prevMaxShield;

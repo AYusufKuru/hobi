@@ -675,7 +675,8 @@ export class SpaceScene extends Phaser.Scene {
         } else if (bullet.ownerId.startsWith('npc-')) {
           img.setDisplaySize(20, 32).setTint(0xff5533);
         } else {
-          img.setDisplaySize(22, 36).setTint(0x66e0ff);
+          const tint = bullet.tint && bullet.tint > 0 ? bullet.tint : 0x66e0ff;
+          img.setDisplaySize(22, 36).setTint(tint);
         }
         gfx = {
           img,
@@ -693,8 +694,16 @@ export class SpaceScene extends Phaser.Scene {
         if (isRocket) {
           gfx.img.setDisplaySize(34, 52).setTint(0xff8844);
         } else {
-          gfx.img.setDisplaySize(22, 36).setTint(0x66e0ff);
+          const tint = bullet.tint && bullet.tint > 0 ? bullet.tint : 0x66e0ff;
+          gfx.img.setDisplaySize(22, 36).setTint(tint);
         }
+      } else if (
+        !isRocket &&
+        !bullet.ownerId.startsWith('npc-') &&
+        bullet.tint &&
+        bullet.tint > 0
+      ) {
+        gfx.img.setTint(bullet.tint);
       }
       gfx.targetId = bullet.targetId ?? gfx.targetId;
       if (bullet.frozen || gfx.frozen) {

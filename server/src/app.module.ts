@@ -17,15 +17,21 @@ import { PlayerEntity } from './player/player.entity';
 function buildTypeOrmConfig() {
   const databaseUrl = process.env.DATABASE_URL?.trim();
   if (databaseUrl) {
+    // Managed Postgres (Neon etc.) — allow cloud certs by default
     return {
       type: 'postgres' as const,
       url: databaseUrl,
       ssl:
         process.env.DB_SSL === 'false'
           ? false
-          : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' },
+          : {
+              rejectUnauthorized:
+                process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
+            },
       entities: [PlayerEntity],
       synchronize: true,
+      retryAttempts: 5,
+      retryDelay: 3000,
     };
   }
 

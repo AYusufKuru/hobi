@@ -27,6 +27,12 @@ export interface ShopItem {
   /** Extra damage vs NPCs when this laser is equipped */
   npcBonus?: number;
   ammoAdd?: number;
+  /** Ammo type key for skill bar */
+  ammoKind?: 'x1' | 'x2' | 'x3' | 'x4' | 'rsb';
+  /** Damage multiplier vs base laser sum */
+  ammoMult?: number;
+  /** Phaser tint for laser beams */
+  ammoColor?: number;
   /** Speed generator points (2–10) */
   speedBonus?: number;
   /** Shield generator max shield add */
@@ -126,22 +132,64 @@ export const SHOP_CATALOG: ShopItem[] = [
     baseDamage: 200,
   },
   {
-    id: 'ammo-ucb',
+    id: 'ammo-x1',
     category: 'ammo',
-    name: 'UCB-100 x200',
-    desc: '+200 cephane (ateşte +50% hasar)',
+    name: 'X1 · LCB-10',
+    desc: '×1 hasar · kırmızı · 1000 mermi',
+    price: 50,
+    currency: 'silver',
+    ammoAdd: 1000,
+    ammoKind: 'x1',
+    ammoMult: 1,
+    ammoColor: 0xff3344,
+  },
+  {
+    id: 'ammo-x2',
+    category: 'ammo',
+    name: 'X2 · MCB-25',
+    desc: '×2 hasar · mavi · 500 mermi',
     price: 120,
     currency: 'silver',
-    ammoAdd: 200,
+    ammoAdd: 500,
+    ammoKind: 'x2',
+    ammoMult: 2,
+    ammoColor: 0x3388ff,
+  },
+  {
+    id: 'ammo-x3',
+    category: 'ammo',
+    name: 'X3 · MCB-50',
+    desc: '×3 hasar · yeşil · 250 mermi',
+    price: 200,
+    currency: 'silver',
+    ammoAdd: 250,
+    ammoKind: 'x3',
+    ammoMult: 3,
+    ammoColor: 0x33dd66,
+  },
+  {
+    id: 'ammo-x4',
+    category: 'ammo',
+    name: 'X4 · UCB-100',
+    desc: '×4 hasar · beyaz · 150 mermi',
+    price: 80,
+    currency: 'gold',
+    ammoAdd: 150,
+    ammoKind: 'x4',
+    ammoMult: 4,
+    ammoColor: 0xffffff,
   },
   {
     id: 'ammo-rsb',
     category: 'ammo',
-    name: 'RSB-75 x80',
-    desc: '+80 cephane (ateşte +50% hasar)',
-    price: 200,
-    currency: 'silver',
-    ammoAdd: 80,
+    name: 'RSB-75',
+    desc: '×5 hasar · turuncu · 1.5 sn seri ateş · 100 mermi',
+    price: 120,
+    currency: 'gold',
+    ammoAdd: 100,
+    ammoKind: 'rsb',
+    ammoMult: 5,
+    ammoColor: 0xff8800,
   },
 
   // —— Hız jeneratörleri (2–10 puan) ——

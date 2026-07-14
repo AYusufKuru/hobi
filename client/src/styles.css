@@ -283,7 +283,7 @@ input {
 .status-toast {
   position: absolute;
   left: 50%;
-  bottom: 4.6rem;
+  bottom: 8.2rem;
   transform: translateX(-50%);
   background: var(--panel);
   border: 1px solid var(--line);
@@ -427,6 +427,70 @@ input {
 
 .phaser-host canvas {
   display: block;
+}
+
+.skill-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 4.4rem;
+  transform: translateX(-50%);
+  z-index: 5;
+  pointer-events: auto;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  background: linear-gradient(
+    160deg,
+    rgba(8, 18, 36, 0.92),
+    rgba(4, 10, 22, 0.88)
+  );
+  border: 1px solid rgba(80, 160, 200, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.skill-slot {
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(120, 160, 190, 0.35);
+  background: rgba(3, 8, 18, 0.85);
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  place-items: center;
+  padding: 0.15rem;
+  position: relative;
+}
+
+.skill-slot.active {
+  border-color: var(--ammo-color, var(--accent));
+  box-shadow: 0 0 0 1px var(--ammo-color, var(--accent)),
+    0 0 12px color-mix(in srgb, var(--ammo-color, #3dd6ff) 45%, transparent);
+}
+
+.skill-slot.empty {
+  opacity: 0.55;
+}
+
+.skill-key {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.55rem;
+  color: var(--muted);
+  justify-self: start;
+  margin-left: 0.15rem;
+}
+
+.skill-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ammo-color, #fff);
+  letter-spacing: 0.04em;
+}
+
+.skill-count {
+  font-size: 0.65rem;
+  color: var(--muted);
 }
 
 .hangar-fab {

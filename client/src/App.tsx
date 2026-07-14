@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import ChatPanel from './game/ChatPanel';
 import HangarPanel, { type HangarState } from './game/HangarPanel';
+import SkillBar from './game/SkillBar';
 import PhaserGame from './game/PhaserGame';
 import {
   createGameSocket,
@@ -250,6 +251,20 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        <SkillBar
+          socket={session.socket}
+          selfId={session.self.id}
+          hangar={hangar}
+          onHangar={setHangar}
+          onAmmo={(count) =>
+            setStats((s) => ({
+              ...s,
+              laserAmmo: count,
+            }))
+          }
+          onToast={hud.onToast}
+        />
 
         <button type="button" className="hangar-fab" onClick={() => void openHangar()}>
           HANGAR

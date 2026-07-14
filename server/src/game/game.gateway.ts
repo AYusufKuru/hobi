@@ -128,6 +128,26 @@ export class GameGateway
     return result;
   }
 
+  @SubscribeMessage('ammo:select')
+  handleAmmoSelect(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { ammoId?: string },
+  ) {
+    return this.game.selectAmmo(client.id, body?.ammoId ?? '');
+  }
+
+  @SubscribeMessage('skillbar:set')
+  handleSkillBarSet(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { slot?: number; ammoId?: string | null },
+  ) {
+    return this.game.setSkillBarSlot(
+      client.id,
+      Number(body?.slot ?? -1),
+      body?.ammoId === undefined ? null : body.ammoId,
+    );
+  }
+
   @SubscribeMessage('hangar:get')
   handleHangarGet(@ConnectedSocket() client: Socket) {
     return this.game.getHangarState(client.id);

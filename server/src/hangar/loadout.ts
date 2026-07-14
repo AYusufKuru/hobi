@@ -11,6 +11,16 @@ export interface ShipFit {
   generators: (string | null)[];
 }
 
+export const SKILL_AMMO_IDS = [
+  'ammo-x1',
+  'ammo-x2',
+  'ammo-x3',
+  'ammo-x4',
+  'ammo-rsb',
+] as const;
+
+export type SkillAmmoId = (typeof SKILL_AMMO_IDS)[number];
+
 /** Depot + per-ship equipment */
 export interface Loadout {
   version: 2;
@@ -23,7 +33,14 @@ export interface Loadout {
   /** Equipment config per owned ship */
   fits: Record<string, ShipFit>;
   activeShipId: string;
+  /** @deprecated legacy total — migrated into ammo stocks */
   laserAmmo: number;
+  /** Stock per ammo pack id (ammo-x1 … ammo-rsb) */
+  ammo: Record<string, number>;
+  /** Selected skill-bar ammo */
+  activeAmmoId: SkillAmmoId;
+  /** Skill bar slot assignments (ammo ids) */
+  skillBar: (SkillAmmoId | null)[];
 }
 
 export interface DerivedStats {
@@ -42,6 +59,36 @@ export interface DerivedStats {
   ammoDamageMult: number;
   laserSlots: number;
   generatorSlots: number;
+}
+
+export function defaultAmmoStocks(): Record<string, number> {
+  return {
+    'ammo-x1': 2000,
+    'ammo-x2': 500,
+    'ammo-x3': 200,
+    'ammo-x4': 100,
+    'ammo-rsb': 50,
+  };
+}
+
+export function defaultSkillBar(): (SkillAmmoId | null)[] {
+  return [...SKILL_AMMO_IDS];
+}
+
+export function isSkillAmmoId(id: string): id is SkillAmmoId {
+  return (SKILL_AMMO_IDS as readonly string[]).includes(id);
+}
+
+export function getAmmoMult(ammoId: string): number {
+  return getCatalogItem(ammoId)?.ammoMult ?? 1;
+}
+
+export function getAmmoColor(ammoId: string): number {
+  return getCatalogItem(ammoId)?.ammoColor ?? 0x66e0ff;
+}
+
+export function activeAmmoCount(loadout: Loadout): number {
+  return Math.max(0, Math.floor(loadout.ammo[loadout.activeAmmoId] ?? 0));
 }
 
 function emptyFit(shipId: string): ShipFit {
@@ -93,7 +140,10 @@ export function defaultLoadout(): Loadout {
       },
     },
     activeShipId: 'ship-phoenix',
-    laserAmmo: 100,
+    laserAmmo: 2000,
+    ammo: defaultAmmoStocks(),
+    activeAmmoId: 'ammo-x1',
+    skillBar: defaultSkillBar(),
   };
   return loadout;
 }
@@ -158,7 +208,10 @@ function migrateV1(parsed: Record<string, unknown>): Loadout {
     laserAmmo:
       typeof parsed.laserAmmo === 'number' && parsed.laserAmmo >= 0
         ? Math.floor(parsed.laserAmmo)
-        : 100,
+        : 2000,
+    ammo: defaultAmmoStocks(),
+    activeAmmoId: 'ammo-x1',
+    skillBar: defaultSkillBar(),
   };
 }
 
@@ -185,7 +238,40 @@ export function parseLoadout(raw: string | null | undefined): Loadout {
     if (!loadout.ships.includes(loadout.activeShipId)) {
       loadout.activeShipId = loadout.ships[0];
     }
-    loadout.laserAmmo = Math.max(0, Math.floor(loadout.laserAmmo ?? 100));
+    loadout.laserAmmo = Math.max(0, Math.floor(loadout.laserAmmo ?? 2000));
+    if (!loadout.ammo || typeof loadout.ammo !== 'object') {
+      loadout.ammo = defaultAmmoStocks();
+      // Migrate legacy single pool into X1
+      if (loadout.laserAmmo > 0) {
+        loadout.ammo['ammo-x1'] = Math.max(
+          loadout.ammo['ammo-x1'] ?? 0,
+          loadout.laserAmmo,
+        );
+      }
+    }
+    for (const id of SKILL_AMMO_IDS) {
+      if (typeof loadout.ammo[id] !== 'number') loadout.ammo[id] = 0;
+      loadout.ammo[id] = Math.max(0, Math.floor(loadout.ammo[id]));
+    }
+    // Legacy packs
+    if (typeof (loadout.ammo as Record<string, number>)['ammo-ucb'] === 'number') {
+      loadout.ammo['ammo-x4'] =
+        (loadout.ammo['ammo-x4'] ?? 0) +
+        Math.floor((loadout.ammo as Record<string, number>)['ammo-ucb']);
+      delete (loadout.ammo as Record<string, number>)['ammo-ucb'];
+    }
+    if (!isSkillAmmoId(loadout.activeAmmoId ?? '')) {
+      loadout.activeAmmoId = 'ammo-x1';
+    }
+    if (!Array.isArray(loadout.skillBar) || loadout.skillBar.length < 5) {
+      loadout.skillBar = defaultSkillBar();
+    } else {
+      loadout.skillBar = loadout.skillBar.slice(0, 5).map((id) =>
+        id && isSkillAmmoId(id) ? id : null,
+      );
+      while (loadout.skillBar.length < 5) loadout.skillBar.push(null);
+    }
+    loadout.laserAmmo = activeAmmoCount(loadout);
     loadout.version = 2;
     return loadout;
   } catch {
@@ -225,8 +311,7 @@ export function deriveStats(loadout: Loadout): DerivedStats {
     if ((g.absorbPct ?? 0) > bestAbsorb) bestAbsorb = g.absorbPct ?? 0;
   }
 
-  const ammoDamageMult =
-    equippedLasers > 0 && loadout.laserAmmo > 0 ? 1.5 : 1;
+  const ammoDamageMult = getAmmoMult(loadout.activeAmmoId);
 
   return {
     speed: Math.max(55, Math.round(speedPoints * SPEED_PER_POINT)),
