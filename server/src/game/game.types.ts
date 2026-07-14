@@ -104,6 +104,39 @@ export const PORTALS = [
   },
 ] as const;
 
+/** Space stations — safe zones where players cannot attack or be attacked */
+export const STATIONS = [
+  {
+    id: 'station-m1',
+    mapId: 'map-1' as MapId,
+    x: 400,
+    y: 400,
+    label: 'İstasyon',
+    safeRadius: 440,
+  },
+  {
+    id: 'station-m2',
+    mapId: 'map-2' as MapId,
+    x: 400,
+    y: 400,
+    label: 'İstasyon',
+    safeRadius: 440,
+  },
+] as const;
+
+export type StationDef = (typeof STATIONS)[number];
+
+export function stationsOnMap(mapId: string) {
+  return STATIONS.filter((s) => s.mapId === mapId);
+}
+
+export function isInSafeZone(mapId: MapId, x: number, y: number): boolean {
+  for (const s of stationsOnMap(mapId)) {
+    if (Math.hypot(x - s.x, y - s.y) <= s.safeRadius) return true;
+  }
+  return false;
+}
+
 export function portalsOnMap(mapId: string) {
   return PORTALS.filter((p) => p.mapId === mapId);
 }
@@ -289,6 +322,7 @@ export interface Snapshot {
   >[];
   cargo: CargoBox[];
   portals: Array<(typeof PORTALS)[number]>;
+  stations: Array<(typeof STATIONS)[number]>;
   mapId: MapId;
   mapName: string;
   serverTime: number;

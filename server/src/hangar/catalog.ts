@@ -8,8 +8,12 @@ export type ShopCategory =
 export const MAX_DROIDS = 8;
 export type ShopCurrency = 'silver' | 'gold';
 
-/** Converts ship speed points (base + gens) into world px/s */
-export const SPEED_PER_POINT = 10;
+/** Hull speed points → world px/s (geminin kendi hızı) */
+export const HULL_SPEED_PER_POINT = 32;
+/** Speed generator points → world px/s (jeneratörler daha az etki eder) */
+export const GEN_SPEED_PER_POINT = 3;
+/** @deprecated use HULL_SPEED_PER_POINT — kept for any legacy refs */
+export const SPEED_PER_POINT = HULL_SPEED_PER_POINT;
 
 export interface ShopItem {
   id: string;
@@ -53,10 +57,10 @@ export const SHOP_CATALOG: ShopItem[] = [
     id: 'ship-phoenix',
     category: 'ships',
     name: 'Phoenix',
-    desc: '6 lazer · 6 jeneratör · can 256.000 · hız tabanı 4',
+    desc: '6 lazer · 6 jeneratör · can 256.000 · hız tabanı 5',
     price: 0,
     currency: 'silver',
-    speed: 4,
+    speed: 5,
     maxHp: 256_000,
     maxShield: 0,
     laserSlots: 6,
@@ -67,10 +71,10 @@ export const SHOP_CATALOG: ShopItem[] = [
     id: 'ship-leonov',
     category: 'ships',
     name: 'Leonov',
-    desc: '10 lazer · 6 jeneratör · can 256.000 · hız tabanı 5',
+    desc: '10 lazer · 6 jeneratör · can 256.000 · hız tabanı 6',
     price: 450,
     currency: 'silver',
-    speed: 5,
+    speed: 6,
     maxHp: 256_000,
     maxShield: 0,
     laserSlots: 10,
@@ -81,10 +85,10 @@ export const SHOP_CATALOG: ShopItem[] = [
     id: 'ship-goliath',
     category: 'ships',
     name: 'Goliath',
-    desc: '16 lazer · 6 jeneratör · can 256.000 · hız tabanı 3',
+    desc: '16 lazer · 6 jeneratör · can 256.000 · hız tabanı 4',
     price: 1800,
     currency: 'silver',
-    speed: 3,
+    speed: 4,
     maxHp: 256_000,
     maxShield: 0,
     laserSlots: 16,
@@ -199,12 +203,12 @@ export const SHOP_CATALOG: ShopItem[] = [
     ammoColor: 0xff8800,
   },
 
-  // —— Hız jeneratörleri (2–10 puan) ——
+  // —— Hız jeneratörleri (gemi hızına ek bonus) ——
   {
     id: 'gen-spd-2',
     category: 'generators',
     name: 'Pulse Drive I',
-    desc: '+2 hız',
+    desc: '+2 hız bonusu',
     price: 80,
     currency: 'silver',
     speedBonus: 2,
@@ -213,37 +217,37 @@ export const SHOP_CATALOG: ShopItem[] = [
     id: 'gen-spd-4',
     category: 'generators',
     name: 'Pulse Drive II',
-    desc: '+4 hız',
+    desc: '+3 hız bonusu',
     price: 180,
     currency: 'silver',
-    speedBonus: 4,
+    speedBonus: 3,
   },
   {
     id: 'gen-spd-6',
     category: 'generators',
     name: 'Pulse Drive III',
-    desc: '+6 hız',
+    desc: '+4 hız bonusu',
     price: 320,
     currency: 'silver',
-    speedBonus: 6,
+    speedBonus: 4,
   },
   {
     id: 'gen-spd-8',
     category: 'generators',
     name: 'Warp Coil',
-    desc: '+8 hız',
+    desc: '+5 hız bonusu',
     price: 35,
     currency: 'gold',
-    speedBonus: 8,
+    speedBonus: 5,
   },
   {
     id: 'gen-spd-10',
     category: 'generators',
     name: 'Warp Core',
-    desc: '+10 hız',
+    desc: '+6 hız bonusu',
     price: 70,
     currency: 'gold',
-    speedBonus: 10,
+    speedBonus: 6,
   },
 
   // —— Kalkan jeneratörleri (görseldeki değerler, farklı isimler) ——

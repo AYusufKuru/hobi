@@ -36,6 +36,8 @@ import {
   PlayerState,
   PORTALS,
   portalsOnMap,
+  stationsOnMap,
+  isInSafeZone,
   Snapshot,
   WORLD,
 } from './game.types';
@@ -636,6 +638,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         ),
       cargo: [...this.cargo.values()],
       portals: [...portalsOnMap(mapId)],
+      stations: [...stationsOnMap(mapId)],
       mapId,
       mapName: map.name,
       serverTime: Date.now(),
@@ -990,12 +993,16 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         player.x > WORLD.width - rad ||
         player.y > WORLD.height - rad
       ) {
-        // Accumulate fractional DPS so HP stays an integer (Postgres int column).
-        const frac = (this.radAccum.get(player.id) ?? 0) + WORLD.radiationDps * dt;
-        const whole = Math.floor(frac);
-        this.radAccum.set(player.id, frac - whole);
-        if (whole > 0) {
-          this.applyDamage(player, whole, events, 'radiation');
+        if (!isInSafeZone(player.mapId, player.x, player.y)) {
+          // Accumulate fractional DPS so HP stays an integer (Postgres int column).
+          const frac = (this.radAccum.get(player.id) ?? 0) + WORLD.radiationDps * dt;
+          const whole = Math.floor(frac);
+          this.radAccum.set(player.id, frac - whole);
+          if (whole > 0) {
+            this.applyDamage(player, whole, events, 'radiation');
+          }
+        } else {
+          this.radAccum.delete(player.id);
         }
       } else {
         this.radAccum.delete(player.id);
@@ -1050,6 +1057,16 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         !!player.targetId &&
         !!aim &&
         laserDist <= WORLD.laserRange;
+
+      if (player.targetId && this.players.has(player.targetId)) {
+        const pvpTarget = this.players.get(player.targetId)!;
+        if (
+          isInSafeZone(pvpTarget.mapId, pvpTarget.x, pvpTarget.y) ||
+          isInSafeZone(player.mapId, player.x, player.y)
+        ) {
+          canLaser = false;
+        }
+      }
 
       if (isRsb) {
         if (now < player.rsbReadyAt) {
@@ -1126,13 +1143,26 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       const wantRocket = input.fireRocket;
       const wasRocket = this.rocketLatch.get(player.id) ?? false;
       if (wantRocket && !wasRocket) {
-        if (
+        let canRocket =
           aim &&
           player.targetId &&
           player.rockets > 0 &&
           laserDist <= WORLD.rocketRange &&
-          now - player.lastRocketAt >= WORLD.rocketCooldownMs
+          now - player.lastRocketAt >= WORLD.rocketCooldownMs;
+        if (
+          canRocket &&
+          player.targetId &&
+          this.players.has(player.targetId)
         ) {
+          const pvpTarget = this.players.get(player.targetId)!;
+          if (
+            isInSafeZone(pvpTarget.mapId, pvpTarget.x, pvpTarget.y) ||
+            isInSafeZone(player.mapId, player.x, player.y)
+          ) {
+            canRocket = false;
+          }
+        }
+        if (canRocket && aim && player.targetId) {
           player.lastRocketAt = now;
           player.rockets -= 1;
           this.spawnProjectileFrom(
@@ -1159,8 +1189,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         }
       }
       this.rocketLatch.set(player.id, wantRocket);
-
-      // Cargo boxes disabled for now (resources later)
 
     }
 
@@ -1387,6 +1415,16 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     if (rolled <= 0) return;
     const playerTarget = this.players.get(targetId);
     if (playerTarget && playerTarget.hp > 0) {
+      if (isInSafeZone(playerTarget.mapId, playerTarget.x, playerTarget.y)) {
+        return;
+      }
+      const attacker = this.players.get(byId);
+      if (
+        attacker &&
+        isInSafeZone(attacker.mapId, attacker.x, attacker.y)
+      ) {
+        return;
+      }
       this.damagePlayer(playerTarget, rolled, byId, events);
       return;
     }
@@ -1589,7 +1627,12 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
 
     const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
-    if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
+    if (
+      prey &&
+      prey.hp > 0 &&
+      prey.mapId === npc.mapId &&
+      !isInSafeZone(prey.mapId, prey.x, prey.y)
+    ) {
       npc.angle = Math.atan2(prey.y - npc.y, prey.x - npc.x);
       const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
       if (d <= tpl.laserRange && tpl.laserDamage > 0) {
@@ -1662,11 +1705,20 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         npc.aggroId = null;
         npc.nextWanderAt = 0;
         npc.engageDist = 0;
+      } else if (isInSafeZone(prey.mapId, prey.x, prey.y)) {
+        npc.aggroId = null;
+        npc.nextWanderAt = 0;
+        npc.engageDist = 0;
       }
     }
 
     const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
-    if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
+    if (
+      prey &&
+      prey.hp > 0 &&
+      prey.mapId === npc.mapId &&
+      !isInSafeZone(prey.mapId, prey.x, prey.y)
+    ) {
       const preyMoved =
         Math.hypot(prey.x - npc.engageAnchorX, prey.y - npc.engageAnchorY) >=
         WORLD.npcRepositionMove;
@@ -1736,6 +1788,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     byId: string,
     events: GameEvent[],
   ) {
+    if (isInSafeZone(target.mapId, target.x, target.y)) return;
     target.lastDamageAt = Date.now();
     target.lastRepairAt = Date.now();
     target.lastShieldRegenAt = Date.now();
@@ -1805,6 +1858,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     _source: string,
   ) {
     if (amount <= 0 || target.hp <= 0) return;
+    if (isInSafeZone(target.mapId, target.x, target.y)) return;
     target.lastDamageAt = Date.now();
     target.lastRepairAt = Date.now();
     target.lastShieldRegenAt = Date.now();

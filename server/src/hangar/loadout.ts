@@ -1,9 +1,10 @@
 import {
+  GEN_SPEED_PER_POINT,
   getCatalogItem,
+  HULL_SPEED_PER_POINT,
   marketCatalog,
   MAX_DROIDS,
   shipSlotCounts,
-  SPEED_PER_POINT,
   type ShopItem,
 } from './catalog';
 
@@ -371,7 +372,8 @@ export function deriveStats(loadout: Loadout): DerivedStats {
   const fit = ensureFit(loadout, shipId);
   const { laserSlots, generatorSlots } = shipSlotCounts(shipId);
 
-  let speedPoints = ship.speed ?? 4;
+  let hullSpeedPoints = ship.speed ?? 5;
+  let genSpeedPoints = 0;
   let maxShield = ship.maxShield ?? 0;
   const maxHp = ship.maxHp ?? 256_000;
   let damage = 0;
@@ -392,7 +394,7 @@ export function deriveStats(loadout: Loadout): DerivedStats {
     if (!gid) continue;
     const g = getCatalogItem(gid);
     if (!g) continue;
-    speedPoints += g.speedBonus ?? 0;
+    genSpeedPoints += g.speedBonus ?? 0;
     maxShield += g.shieldBonus ?? 0;
     if ((g.absorbPct ?? 0) > bestAbsorb) bestAbsorb = g.absorbPct ?? 0;
   }
@@ -420,8 +422,11 @@ export function deriveStats(loadout: Loadout): DerivedStats {
 
   const ammoDamageMult = getAmmoMult(loadout.activeAmmoId);
 
+  const hullPx = hullSpeedPoints * HULL_SPEED_PER_POINT;
+  const genPx = genSpeedPoints * GEN_SPEED_PER_POINT;
+
   return {
-    speed: Math.max(55, Math.round(speedPoints * SPEED_PER_POINT)),
+    speed: Math.max(100, Math.round(hullPx + genPx)),
     maxHp,
     maxShield,
     shieldAbsorb: maxShield > 0 ? bestAbsorb : 0,

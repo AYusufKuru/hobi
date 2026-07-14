@@ -46,6 +46,15 @@ export interface PortalPublic {
   toY: number;
 }
 
+export interface StationPublic {
+  id: string;
+  mapId: string;
+  x: number;
+  y: number;
+  label: string;
+  safeRadius: number;
+}
+
 export interface PlayerPublic {
   id: string;
   name: string;
@@ -119,6 +128,7 @@ export interface Snapshot {
   npcs: NpcPublic[];
   cargo: CargoPublic[];
   portals: PortalPublic[];
+  stations?: StationPublic[];
   mapId?: string;
   mapName?: string;
   serverTime: number;

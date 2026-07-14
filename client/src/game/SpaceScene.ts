@@ -113,6 +113,7 @@ export class SpaceScene extends Phaser.Scene {
   private worldFx!: Phaser.GameObjects.Graphics;
   private radiationGfx!: Phaser.GameObjects.Graphics;
   private minimapGfx!: Phaser.GameObjects.Graphics;
+  private stationLabels = new Map<string, Phaser.GameObjects.Text>();
   private cursorGfx!: Phaser.GameObjects.Graphics;
   private ctrlKey!: Phaser.Input.Keyboard.Key;
   private spaceKey!: Phaser.Input.Keyboard.Key;
@@ -588,6 +589,7 @@ export class SpaceScene extends Phaser.Scene {
       const gfx = this.ships.get(p.id);
       const px = gfx?.renderX ?? p.x;
       const py = gfx?.renderY ?? p.y;
+      if (this.isInSafeZone(px, py)) continue;
       const d = Math.hypot(px - x, py - y);
       if (d <= PICK_RADIUS && (!best || d < best.d)) {
         best = { id: p.id, kind: 'player', name: p.name, d };
@@ -604,6 +606,13 @@ export class SpaceScene extends Phaser.Scene {
       }
     }
     return best ? { id: best.id, kind: best.kind, name: best.name } : null;
+  }
+
+  private isInSafeZone(x: number, y: number): boolean {
+    for (const s of this.latest?.stations ?? []) {
+      if (Math.hypot(x - s.x, y - s.y) <= s.safeRadius) return true;
+    }
+    return false;
   }
 
   private findEntityPos(id: string) {
@@ -997,6 +1006,8 @@ export class SpaceScene extends Phaser.Scene {
     g.clear();
     const pulse = 0.55 + Math.sin(this.time.now / 220) * 0.25;
 
+    this.drawStations(g, pulse);
+
     for (const portal of this.latest?.portals ?? []) {
       const r = this.world.portalRadius ?? 48;
       g.lineStyle(3, 0xa78bfa, 0.55 + pulse * 0.35);
@@ -1007,6 +1018,89 @@ export class SpaceScene extends Phaser.Scene {
       g.strokeCircle(portal.x, portal.y, r * 0.28);
       g.fillStyle(0xa78bfa, 0.08 + pulse * 0.06);
       g.fillCircle(portal.x, portal.y, r * 0.5);
+    }
+  }
+
+  private drawStations(g: Phaser.GameObjects.Graphics, pulse: number) {
+    const spin = this.time.now / 900;
+    const pulse2 = 0.5 + Math.sin(this.time.now / 380 + 0.8) * 0.28;
+
+    for (const station of this.latest?.stations ?? []) {
+      const { x, y, safeRadius: r, label, id } = station;
+
+      g.fillStyle(0x22d3ee, 0.035 + pulse * 0.025);
+      g.fillCircle(x, y, r);
+      g.lineStyle(2, 0x22d3ee, 0.1 + pulse * 0.12);
+      g.strokeCircle(x, y, r);
+      g.lineStyle(1, 0x86efac, 0.07 + pulse2 * 0.1);
+      g.strokeCircle(x, y, r * 0.68);
+
+      const platR = 118;
+      g.fillStyle(0x0f172a, 0.72);
+      g.fillCircle(x, y, platR + 8);
+      g.fillStyle(0x1e293b, 0.92);
+      g.fillCircle(x, y, platR);
+      g.lineStyle(3, 0x334155, 0.95);
+      g.strokeCircle(x, y, platR);
+      g.lineStyle(2, 0x38bdf8, 0.45 + pulse * 0.35);
+      g.strokeCircle(x, y, platR * 0.76);
+
+      g.lineStyle(5, 0x475569, 0.75);
+      g.lineBetween(x - platR * 0.88, y, x + platR * 0.88, y);
+      g.lineBetween(x, y - platR * 0.88, x, y + platR * 0.88);
+      g.lineStyle(3, 0x64748b, 0.55);
+      g.lineBetween(x - platR * 0.55, y - platR * 0.55, x + platR * 0.55, y + platR * 0.55);
+      g.lineBetween(x - platR * 0.55, y + platR * 0.55, x + platR * 0.55, y - platR * 0.55);
+
+      g.fillStyle(0x020617, 0.95);
+      g.fillCircle(x, y, 34);
+      g.fillStyle(0x0c4a6e, 0.9);
+      g.fillCircle(x, y - 48, 26);
+      g.fillStyle(0x38bdf8, 0.85);
+      g.fillCircle(x, y - 48, 14);
+      g.fillStyle(0xe0f2fe, 0.55 + pulse * 0.35);
+      g.fillCircle(x, y - 48, 6);
+
+      g.fillStyle(0x4ade80, 0.45 + pulse * 0.45);
+      g.fillCircle(x, y - 74, 5 + pulse * 2);
+      g.lineStyle(2, 0x4ade80, 0.25 + pulse * 0.2);
+      g.strokeCircle(x, y - 74, 12 + pulse * 4);
+
+      for (let i = 0; i < 4; i++) {
+        const ang = spin + i * (Math.PI / 2);
+        const orbit = platR + 24;
+        const ax = x + Math.cos(ang) * orbit;
+        const ay = y + Math.sin(ang) * orbit;
+        g.fillStyle(0x67e8f9, 0.4 + pulse2 * 0.3);
+        g.fillCircle(ax, ay, 7);
+        g.lineStyle(1, 0xa5f3fc, 0.35);
+        g.lineBetween(x, y, ax, ay);
+      }
+
+      let txt = this.stationLabels.get(id);
+      if (!txt) {
+        txt = this.add
+          .text(x, y - platR - 28, label, {
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '14px',
+            color: '#a5f3fc',
+            stroke: '#020617',
+            strokeThickness: 4,
+          })
+          .setOrigin(0.5)
+          .setDepth(5);
+        this.stationLabels.set(id, txt);
+      }
+      txt.setPosition(x, y - platR - 28);
+      txt.setText(label);
+      txt.setAlpha(0.82 + pulse * 0.18);
+    }
+
+    for (const [id, txt] of this.stationLabels) {
+      if (!(this.latest?.stations ?? []).some((s) => s.id === id)) {
+        txt.destroy();
+        this.stationLabels.delete(id);
+      }
     }
   }
 
@@ -1062,6 +1156,20 @@ export class SpaceScene extends Phaser.Scene {
       g.fillRect(mm.x, mm.y + mm.h - inset * sy, mm.w, inset * sy);
       g.fillRect(mm.x, mm.y, inset * sx, mm.h);
       g.fillRect(mm.x + mm.w - inset * sx, mm.y, inset * sx, mm.h);
+    }
+
+    const scaleX = mm.w / this.world.width;
+    const scaleY = mm.h / this.world.height;
+    for (const station of this.latest?.stations ?? []) {
+      const stx = mm.x + station.x * scaleX;
+      const sty = mm.y + station.y * scaleY;
+      const sr = Math.max(6, station.safeRadius * scaleX);
+      g.fillStyle(0x22d3ee, 0.12);
+      g.fillCircle(stx, sty, sr);
+      g.lineStyle(1, 0x38bdf8, 0.45);
+      g.strokeCircle(stx, sty, sr);
+      g.fillStyle(0x7dd3fc, 0.95);
+      g.fillCircle(stx, sty, 5);
     }
 
     for (const portal of this.latest?.portals ?? []) {
