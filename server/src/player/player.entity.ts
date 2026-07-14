@@ -14,6 +14,13 @@ export class PlayerEntity {
   @Column({ unique: true })
   name: string;
 
+  @Column({ unique: true, nullable: true, type: 'varchar' })
+  email: string | null;
+
+  /** salt:hex format (scrypt). Empty = legacy account without password. */
+  @Column({ type: 'text', default: '' })
+  passwordHash: string;
+
   @Column({ type: 'float', default: 0 })
   x: number;
 

@@ -68,12 +68,28 @@ export class GameGateway
     }
   }
 
+  @SubscribeMessage('auth:register')
+  async handleRegister(
+    @MessageBody()
+    body: { email?: string; name?: string; password?: string },
+  ) {
+    return this.game.register(
+      body?.email ?? '',
+      body?.name ?? '',
+      body?.password ?? '',
+    );
+  }
+
   @SubscribeMessage('join')
   async handleJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { name?: string },
+    @MessageBody() body: { name?: string; password?: string },
   ) {
-    const result = await this.game.join(client.id, body?.name ?? '');
+    const result = await this.game.join(
+      client.id,
+      body?.name ?? '',
+      body?.password ?? '',
+    );
     if (result.ok) {
       client.broadcast.emit('playerJoined', result.self);
     }

@@ -145,6 +145,38 @@ input {
   letter-spacing: 0.04em;
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin: 0 0 1.25rem;
+}
+
+.auth-tabs button {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(3, 8, 18, 0.55);
+  color: var(--muted);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.65rem 0.5rem;
+  cursor: pointer;
+}
+
+.auth-tabs button.active {
+  color: #031018;
+  background: linear-gradient(120deg, var(--accent-dim), var(--accent));
+  border-color: transparent;
+}
+
+.auth-tabs button:hover:not(.active) {
+  color: var(--text);
+  border-color: rgba(61, 214, 255, 0.35);
+}
+
 .lobby label {
   display: block;
   font-size: 0.85rem;
@@ -169,7 +201,7 @@ input {
   box-shadow: 0 0 0 3px rgba(61, 214, 255, 0.15);
 }
 
-.lobby button {
+.lobby button[type='submit'] {
   width: 100%;
   border: 0;
   cursor: pointer;
@@ -182,12 +214,12 @@ input {
   text-transform: uppercase;
 }
 
-.lobby button:disabled {
+.lobby button[type='submit']:disabled {
   opacity: 0.55;
   cursor: wait;
 }
 
-.lobby button:hover:not(:disabled) {
+.lobby button[type='submit']:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 

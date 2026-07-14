@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuid } from 'uuid';
+import { hashPassword, verifyPassword } from '../auth/password';
 import { PlayerEntity } from '../player/player.entity';
 import {
   getCatalogItem,
@@ -391,9 +392,72 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async join(socketId: string, rawName: string) {
+  async register(rawEmail: string, rawName: string, rawPassword: string) {
+    const email = (rawEmail || '').trim().toLowerCase().slice(0, 120);
     const name = (rawName || '').trim().slice(0, 16);
+    const password = rawPassword || '';
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { ok: false as const, error: 'Geçerli bir e-posta gir' };
+    }
+    if (name.length < 2) {
+      return { ok: false as const, error: 'İsim en az 2 karakter' };
+    }
+    if (password.length < 6) {
+      return { ok: false as const, error: 'Şifre en az 6 karakter' };
+    }
+
+    const nameTaken = await this.playerRepo
+      .createQueryBuilder('p')
+      .where('LOWER(p.name) = LOWER(:name)', { name })
+      .getOne();
+    const emailTaken = await this.playerRepo
+      .createQueryBuilder('p')
+      .where('LOWER(p.email) = LOWER(:email)', { email })
+      .getOne();
+
+    // Claim legacy name-only account (no password yet)
+    if (nameTaken && !nameTaken.passwordHash) {
+      if (emailTaken && emailTaken.id !== nameTaken.id) {
+        return { ok: false as const, error: 'Bu e-posta kullanımda' };
+      }
+      nameTaken.email = email;
+      nameTaken.passwordHash = await hashPassword(password);
+      await this.playerRepo.save(nameTaken);
+      return { ok: true as const, name: nameTaken.name };
+    }
+
+    if (nameTaken) {
+      return { ok: false as const, error: 'Bu isim alınmış' };
+    }
+    if (emailTaken) {
+      return { ok: false as const, error: 'Bu e-posta kullanımda' };
+    }
+
+    const loadout = parseLoadout('');
+    const stats = deriveStats(loadout);
+    const entity = this.playerRepo.create({
+      id: uuid(),
+      name,
+      email,
+      passwordHash: await hashPassword(password),
+      x: 420 + Math.random() * 80,
+      y: 420 + Math.random() * 80,
+      hp: stats.maxHp,
+      credits: 800,
+      gold: 25,
+      kills: 0,
+      loadoutJson: JSON.stringify(loadout),
+    });
+    await this.playerRepo.save(entity);
+    return { ok: true as const, name: entity.name };
+  }
+
+  async join(socketId: string, rawName: string, rawPassword: string) {
+    const name = (rawName || '').trim().slice(0, 16);
+    const password = rawPassword || '';
     if (!name) return { ok: false as const, error: 'İsim gerekli' };
+    if (!password) return { ok: false as const, error: 'Şifre gerekli' };
 
     const existingOnline = [...this.players.values()].find(
       (p) => p.name.toLowerCase() === name.toLowerCase(),
@@ -402,34 +466,36 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       return { ok: false as const, error: 'Bu isim şu an oyunda' };
     }
 
-    let entity = await this.playerRepo.findOne({ where: { name } });
-    const loadout = parseLoadout(entity?.loadoutJson);
+    const entity = await this.playerRepo
+      .createQueryBuilder('p')
+      .where('LOWER(p.name) = LOWER(:name)', { name })
+      .getOne();
+    if (!entity) {
+      return { ok: false as const, error: 'Hesap bulunamadı — önce kayıt ol' };
+    }
+    if (!entity.passwordHash) {
+      return {
+        ok: false as const,
+        error: 'Bu hesap için şifre yok — Kayıt ol ile bağla',
+      };
+    }
+    const okPass = await verifyPassword(password, entity.passwordHash);
+    if (!okPass) {
+      return { ok: false as const, error: 'İsim veya şifre yanlış' };
+    }
+
+    const loadout = parseLoadout(entity.loadoutJson);
     const stats = deriveStats(loadout);
 
-    if (!entity) {
-      entity = this.playerRepo.create({
-        id: uuid(),
-        name,
-        x: 420 + Math.random() * 80,
-        y: 420 + Math.random() * 80,
-        hp: stats.maxHp,
-        credits: 800,
-        gold: 25,
-        kills: 0,
-        loadoutJson: JSON.stringify(loadout),
-      });
-      await this.playerRepo.save(entity);
-    } else {
-      entity.hp = stats.maxHp;
-      entity.x = 420 + Math.random() * 80;
-      entity.y = 420 + Math.random() * 80;
-      entity.loadoutJson = JSON.stringify(loadout);
-      if (entity.credits < 50) {
-        entity.credits = Math.max(entity.credits, 200);
-      }
-      if (entity.gold == null) entity.gold = 25;
-      await this.playerRepo.save(entity);
+    entity.hp = stats.maxHp;
+    entity.x = 420 + Math.random() * 80;
+    entity.y = 420 + Math.random() * 80;
+    entity.loadoutJson = JSON.stringify(loadout);
+    if (entity.credits < 50) {
+      entity.credits = Math.max(entity.credits, 200);
     }
+    if (entity.gold == null) entity.gold = 25;
+    await this.playerRepo.save(entity);
 
     const color = COLORS[Math.abs(this.hash(name)) % COLORS.length];
     const player: PlayerState = {

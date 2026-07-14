@@ -1,8 +1,15 @@
 import { FormEvent, useMemo, useState } from 'react';
 import HangarPanel, { type HangarState } from './game/HangarPanel';
 import PhaserGame from './game/PhaserGame';
-import { createGameSocket, joinGame, type GameSocket } from './game/socket';
+import {
+  createGameSocket,
+  joinGame,
+  registerAccount,
+  type GameSocket,
+} from './game/socket';
 import type { PlayerPublic, Snapshot, WorldConfig } from './game/types';
+
+type AuthMode = 'login' | 'register';
 
 type Session = {
   socket: GameSocket;
@@ -28,7 +35,11 @@ type HudStats = {
 };
 
 export default function App() {
+  const [mode, setMode] = useState<AuthMode>('login');
   const [name, setName] = useState(() => localStorage.getItem('govorbit-name') ?? '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -80,76 +91,97 @@ export default function App() {
     });
   }
 
+  async function connectSocket(): Promise<GameSocket> {
+    const socket = createGameSocket();
+    socket.connect();
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Sunucuya bağlanılamadı')), 5000);
+      socket.once('connect', () => {
+        clearTimeout(t);
+        resolve();
+      });
+      socket.once('connect_error', (err) => {
+        clearTimeout(t);
+        reject(err);
+      });
+    });
+    return socket;
+  }
+
+  async function enterGame(socket: GameSocket, pilotName: string, pass: string) {
+    const result = await joinGame(socket, pilotName, pass);
+    if (!result.ok || !result.self || !result.world) {
+      socket.disconnect();
+      setError(result.error ?? 'Giriş başarısız');
+      return;
+    }
+
+    localStorage.setItem('govorbit-name', pilotName.trim());
+    const self = result.self as PlayerPublic;
+    setStats({
+      hp: self.hp,
+      maxHp: self.maxHp ?? result.world.maxHp,
+      shield: self.shield,
+      maxShield: self.maxShield ?? result.world.maxShield,
+      credits: self.credits,
+      gold: self.gold ?? 0,
+      kills: self.kills,
+      name: self.name,
+      targetName: null,
+      firing: false,
+      rockets: self.rockets,
+      laserAmmo: self.laserAmmo ?? 0,
+      inRange: false,
+    });
+    if ((result as { hangar?: HangarState }).hangar) {
+      setHangar((result as { hangar?: HangarState }).hangar!);
+    }
+    setSession({
+      socket,
+      self: {
+        ...self,
+        moving: false,
+        inRange: false,
+        targetId: self.targetId ?? null,
+        firing: self.firing ?? false,
+        shipSprite: self.shipSprite ?? 'ship-player',
+        maxHp: self.maxHp ?? result.world.maxHp,
+        maxShield: self.maxShield ?? result.world.maxShield,
+        laserAmmo: self.laserAmmo ?? 0,
+        shipId: self.shipId ?? 'ship-phoenix',
+        shipSpeed: self.shipSpeed ?? result.world.shipSpeed,
+        laserDamage: self.laserDamage ?? 12,
+      },
+      world: result.world,
+      snapshot: result.snapshot,
+    });
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const socket = createGameSocket();
-    socket.connect();
-
     try {
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('Sunucuya bağlanılamadı')), 5000);
-        socket.once('connect', () => {
-          clearTimeout(t);
-          resolve();
-        });
-        socket.once('connect_error', (err) => {
-          clearTimeout(t);
-          reject(err);
-        });
-      });
-
-      const result = await joinGame(socket, name);
-      if (!result.ok || !result.self || !result.world) {
-        socket.disconnect();
-        setError(result.error ?? 'Giriş başarısız');
-        setLoading(false);
+      if (mode === 'register') {
+        if (password !== password2) {
+          setError('Şifreler eşleşmiyor');
+          return;
+        }
+        const socket = await connectSocket();
+        const reg = await registerAccount(socket, email, name, password);
+        if (!reg.ok) {
+          socket.disconnect();
+          setError(reg.error ?? 'Kayıt başarısız');
+          return;
+        }
+        await enterGame(socket, reg.name ?? name, password);
         return;
       }
 
-      localStorage.setItem('govorbit-name', name.trim());
-      const self = result.self as PlayerPublic;
-      setStats({
-        hp: self.hp,
-        maxHp: self.maxHp ?? result.world.maxHp,
-        shield: self.shield,
-        maxShield: self.maxShield ?? result.world.maxShield,
-        credits: self.credits,
-        gold: self.gold ?? 0,
-        kills: self.kills,
-        name: self.name,
-        targetName: null,
-        firing: false,
-        rockets: self.rockets,
-        laserAmmo: self.laserAmmo ?? 0,
-        inRange: false,
-      });
-      if ((result as { hangar?: HangarState }).hangar) {
-        setHangar((result as { hangar?: HangarState }).hangar!);
-      }
-      setSession({
-        socket,
-        self: {
-          ...self,
-          moving: false,
-          inRange: false,
-          targetId: self.targetId ?? null,
-          firing: self.firing ?? false,
-          shipSprite: self.shipSprite ?? 'ship-player',
-          maxHp: self.maxHp ?? result.world.maxHp,
-          maxShield: self.maxShield ?? result.world.maxShield,
-          laserAmmo: self.laserAmmo ?? 0,
-          shipId: self.shipId ?? 'ship-phoenix',
-          shipSpeed: self.shipSpeed ?? result.world.shipSpeed,
-          laserDamage: self.laserDamage ?? 12,
-        },
-        world: result.world,
-        snapshot: result.snapshot,
-      });
+      const socket = await connectSocket();
+      await enterGame(socket, name, password);
     } catch (err) {
-      socket.disconnect();
       setError(err instanceof Error ? err.message : 'Bağlantı hatası');
     } finally {
       setLoading(false);
@@ -258,30 +290,110 @@ export default function App() {
         <form className="lobby" onSubmit={onSubmit}>
           <h1 className="brand">GOVORBIT</h1>
           <p className="tagline">DarkOrbit tarzı çok oyunculu uzay demosu</p>
+
+          <div className="auth-tabs" role="tablist">
+            <button
+              type="button"
+              className={mode === 'login' ? 'active' : ''}
+              onClick={() => {
+                setMode('login');
+                setError('');
+              }}
+            >
+              Giriş
+            </button>
+            <button
+              type="button"
+              className={mode === 'register' ? 'active' : ''}
+              onClick={() => {
+                setMode('register');
+                setError('');
+              }}
+            >
+              Kayıt ol
+            </button>
+          </div>
+
+          {mode === 'register' && (
+            <>
+              <label htmlFor="email">E-posta</label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ornek@mail.com"
+                required
+              />
+            </>
+          )}
+
           <label htmlFor="pilot">Pilot adı</label>
           <input
             id="pilot"
             maxLength={16}
+            autoComplete="username"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="örn. Nova"
             autoFocus
             required
           />
+
+          <label htmlFor="password">Şifre</label>
+          <input
+            id="password"
+            type="password"
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={mode === 'register' ? 'en az 6 karakter' : '••••••'}
+            minLength={mode === 'register' ? 6 : 1}
+            required
+          />
+
+          {mode === 'register' && (
+            <>
+              <label htmlFor="password2">Şifre tekrar</label>
+              <input
+                id="password2"
+                type="password"
+                autoComplete="new-password"
+                value={password2}
+                onChange={(e) => setPassword2(e.target.value)}
+                placeholder="şifreyi tekrar yaz"
+                minLength={6}
+                required
+              />
+            </>
+          )}
+
           <p className="error">{error}</p>
-          <button type="submit" disabled={loading || !name.trim()}>
-            {loading ? 'Bağlanıyor...' : 'Fırlat'}
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              !name.trim() ||
+              !password ||
+              (mode === 'register' && (!email.trim() || !password2))
+            }
+          >
+            {loading
+              ? mode === 'register'
+                ? 'Kaydediliyor...'
+                : 'Giriş yapılıyor...'
+              : mode === 'register'
+                ? 'Kayıt ol ve fırlat'
+                : 'Giriş yap'}
           </button>
           <ul className="hints">
             <li>
-              <strong>Sol tık</strong> — boşluğa git · basılı tutunca imleç yönüne
+              Üyelikte <strong>gümüş, altın, hangar</strong> ve ekipman kaydolur
             </li>
             <li>
-              <strong>Çift tık</strong> — hedef + lazer · <strong>Ctrl</strong>{' '}
-              lazer · <strong>Space</strong> roket
-            </li>
-            <li>
-              <strong>Hangar</strong> — gemi, lazer, cephane, jeneratör
+              <strong>Sol tık</strong> git · <strong>Ctrl</strong> lazer ·{' '}
+              <strong>Space</strong> roket
             </li>
           </ul>
         </form>

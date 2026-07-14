@@ -5,6 +5,8 @@ const URL = import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:3001';
 
 export type GameSocket = Socket;
 
+export type AuthResult = { ok: boolean; error?: string; name?: string };
+
 export function createGameSocket(): GameSocket {
   return io(URL, {
     autoConnect: false,
@@ -12,12 +14,32 @@ export function createGameSocket(): GameSocket {
   });
 }
 
+export function registerAccount(
+  socket: GameSocket,
+  email: string,
+  name: string,
+  password: string,
+): Promise<AuthResult> {
+  return new Promise((resolve) => {
+    socket.emit(
+      'auth:register',
+      { email, name, password },
+      (result: AuthResult) => resolve(result),
+    );
+  });
+}
+
 export function joinGame(
   socket: GameSocket,
   name: string,
+  password: string,
 ): Promise<JoinResult> {
   return new Promise((resolve) => {
-    socket.emit('join', { name }, (result: JoinResult) => resolve(result));
+    socket.emit(
+      'join',
+      { name, password },
+      (result: JoinResult) => resolve(result),
+    );
   });
 }
 
