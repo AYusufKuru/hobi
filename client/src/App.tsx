@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import ChatPanel from './game/ChatPanel';
 import HangarPanel, { type HangarState } from './game/HangarPanel';
 import PhaserGame from './game/PhaserGame';
 import {
@@ -253,6 +254,8 @@ export default function App() {
         <button type="button" className="hangar-fab" onClick={() => void openHangar()}>
           HANGAR
         </button>
+
+        <ChatPanel socket={session.socket} selfId={session.self.id} />
 
         <HangarPanel
           open={hangarOpen}

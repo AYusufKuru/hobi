@@ -34,11 +34,11 @@ export class PlayerEntity {
   @Column({ type: 'int', default: 100 })
   hp: number;
 
-  @Column({ type: 'int', default: 500 })
+  @Column({ type: 'int', default: 10000 })
   credits: number;
 
   /** Altın (gold) — premium hangar currency */
-  @Column({ type: 'int', default: 25 })
+  @Column({ type: 'int', default: 2000 })
   gold: number;
 
   @Column({ type: 'int', default: 0 })

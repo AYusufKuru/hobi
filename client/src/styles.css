@@ -446,6 +446,116 @@ input {
   cursor: pointer;
 }
 
+.chat-panel {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+  pointer-events: auto;
+  width: min(320px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.6rem 0.6rem;
+  background: linear-gradient(
+    160deg,
+    rgba(8, 18, 36, 0.9),
+    rgba(4, 10, 22, 0.86)
+  );
+  border: 1px solid rgba(80, 160, 200, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.chat-head {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.chat-log {
+  height: 132px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding-right: 0.2rem;
+  scrollbar-width: thin;
+}
+
+.chat-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  opacity: 0.75;
+  padding: 0.35rem 0;
+}
+
+.chat-line {
+  font-size: 0.9rem;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.chat-line.self .chat-name {
+  color: var(--accent);
+}
+
+.chat-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #9ad8ff;
+  margin-right: 0.4rem;
+}
+
+.chat-text {
+  color: var(--text);
+}
+
+.chat-error {
+  color: var(--warn);
+  font-size: 0.8rem;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem;
+}
+
+.chat-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(3, 8, 18, 0.85);
+  color: var(--text);
+  padding: 0.45rem 0.55rem;
+  outline: none;
+  font: inherit;
+}
+
+.chat-form input:focus {
+  border-color: var(--accent);
+}
+
+.chat-form button {
+  border: 0;
+  cursor: pointer;
+  padding: 0.45rem 0.7rem;
+  background: linear-gradient(120deg, var(--accent-dim), var(--accent));
+  color: #031018;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chat-form button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .hangar-fab:hover {
   filter: brightness(1.1);
 }

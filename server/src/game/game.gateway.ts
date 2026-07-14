@@ -116,6 +116,18 @@ export class GameGateway
     return this.game.startPortalJump(client.id, body?.portalId ?? '');
   }
 
+  @SubscribeMessage('chat:send')
+  handleChat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { text?: string },
+  ) {
+    const result = this.game.sendChat(client.id, body?.text ?? '');
+    if (result.ok) {
+      this.server.emit('chat', result.message);
+    }
+    return result;
+  }
+
   @SubscribeMessage('hangar:get')
   handleHangarGet(@ConnectedSocket() client: Socket) {
     return this.game.getHangarState(client.id);

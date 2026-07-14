@@ -87,6 +87,8 @@ export class SpaceScene extends Phaser.Scene {
 
   private destX: number | null = null;
   private destY: number | null = null;
+  /** Show minimap dest mark only when destination was set via minimap click */
+  private destFromMinimap = false;
   private targetId: string | null = null;
   private firing = false;
   private fireRocket = false;
@@ -195,6 +197,7 @@ export class SpaceScene extends Phaser.Scene {
         this.deadUntil = Date.now() + (payload.respawnInMs ?? 2500);
         this.destX = null;
         this.destY = null;
+        this.destFromMinimap = false;
         this.targetId = null;
         this.firing = false;
         this.fireRocket = false;
@@ -294,6 +297,7 @@ export class SpaceScene extends Phaser.Scene {
         this.firing = false;
         this.destX = null;
         this.destY = null;
+        this.destFromMinimap = false;
         this.hud.onToast?.(
           payload.message ??
             (payload.mapName
@@ -338,11 +342,11 @@ export class SpaceScene extends Phaser.Scene {
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.ctrlKey)) {
-      this.toggleFire();
+      if (!this.isTypingInUi()) this.toggleFire();
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
-      if (Date.now() >= this.deadUntil) {
+      if (!this.isTypingInUi() && Date.now() >= this.deadUntil) {
         this.fireRocket = true;
         this.rocketHoldFrames = ROCKET_HOLD_FRAMES;
       }
@@ -358,6 +362,17 @@ export class SpaceScene extends Phaser.Scene {
     this.updateCamera(delta);
     this.pushInput();
     this.updateHud();
+  }
+
+  private isTypingInUi() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return (
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      (el as HTMLElement).isContentEditable
+    );
   }
 
   private updateHoldSteer() {
@@ -376,6 +391,7 @@ export class SpaceScene extends Phaser.Scene {
     if (this.isOverMinimap(pointer.x, pointer.y)) return;
 
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    this.destFromMinimap = false;
     this.destX = Phaser.Math.Clamp(world.x, 20, this.world.width - 20);
     this.destY = Phaser.Math.Clamp(world.y, 20, this.world.height - 20);
   }
@@ -420,6 +436,7 @@ export class SpaceScene extends Phaser.Scene {
     const u = (sx - mm.x) / mm.w;
     const v = (sy - mm.y) / mm.h;
     this.holdSteer = false;
+    this.destFromMinimap = true;
     this.destX = Phaser.Math.Clamp(u * this.world.width, 20, this.world.width - 20);
     this.destY = Phaser.Math.Clamp(v * this.world.height, 20, this.world.height - 20);
     return true;
@@ -463,6 +480,7 @@ export class SpaceScene extends Phaser.Scene {
     }
 
     this.holdSteer = true;
+    this.destFromMinimap = false;
     this.destX = Phaser.Math.Clamp(x, 20, this.world.width - 20);
     this.destY = Phaser.Math.Clamp(y, 20, this.world.height - 20);
   }
@@ -511,7 +529,13 @@ export class SpaceScene extends Phaser.Scene {
       return;
     }
     this.firing = !this.firing;
-    this.hud.onToast?.(this.firing ? 'ATEŞ AÇILDI' : 'Ateş durduruldu');
+    if (!this.firing) {
+      // Stop fire also clears lock so ship stops tracking the target
+      this.targetId = null;
+      this.hud.onToast?.('Ateş kapandı · kilit kalktı');
+    } else {
+      this.hud.onToast?.('ATEŞ AÇILDI');
+    }
     this.time.delayedCall(800, () => this.hud.onToast?.(null));
   }
 
@@ -722,6 +746,7 @@ export class SpaceScene extends Phaser.Scene {
       if (d < (this.world.arriveRadius ?? 14) + 8 && !self.moving) {
         this.destX = null;
         this.destY = null;
+        this.destFromMinimap = false;
       }
     }
   }
@@ -757,6 +782,7 @@ export class SpaceScene extends Phaser.Scene {
             if (!this.holdSteer) {
               this.destX = null;
               this.destY = null;
+              this.destFromMinimap = false;
             }
             if (!p.moving) {
               gfx.renderX = p.x;
@@ -769,8 +795,23 @@ export class SpaceScene extends Phaser.Scene {
           gfx.renderY = p.y;
         }
       } else {
-        gfx.renderX += (p.x - gfx.renderX) * otherLerp;
-        gfx.renderY += (p.y - gfx.renderY) * otherLerp;
+        // Remote ships: lerp while moving, hard stop when server says stopped
+        // (avoids asymptotic coast that looks like sliding)
+        if (!p.moving || p.hp <= 0) {
+          gfx.renderX = p.x;
+          gfx.renderY = p.y;
+        } else {
+          const dx = p.x - gfx.renderX;
+          const dy = p.y - gfx.renderY;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 4) {
+            gfx.renderX = p.x;
+            gfx.renderY = p.y;
+          } else {
+            gfx.renderX += dx * otherLerp;
+            gfx.renderY += dy * otherLerp;
+          }
+        }
       }
 
       gfx.renderAngle = p.angle;
@@ -998,9 +1039,21 @@ export class SpaceScene extends Phaser.Scene {
       g.strokeCircle(mm.x + self.x * sx, mm.y + self.y * sy, 5);
     }
 
-    if (this.destX !== null && this.destY !== null) {
-      g.lineStyle(1, 0x3dd6ff, 0.8);
-      g.strokeCircle(mm.x + this.destX * sx, mm.y + this.destY * sy, 4);
+    if (
+      this.destFromMinimap &&
+      this.destX !== null &&
+      this.destY !== null
+    ) {
+      const cx = mm.x + this.destX * sx;
+      const cy = mm.y + this.destY * sy;
+      const arm = 5;
+      g.lineStyle(1.5, 0x3dd6ff, 0.95);
+      g.beginPath();
+      g.moveTo(cx - arm, cy);
+      g.lineTo(cx + arm, cy);
+      g.moveTo(cx, cy - arm);
+      g.lineTo(cx, cy + arm);
+      g.strokePath();
     }
   }
 

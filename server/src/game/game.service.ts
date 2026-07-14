@@ -333,6 +333,39 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     return player?.mapId ?? null;
   }
 
+  private chatCooldown = new Map<string, number>();
+
+  sendChat(socketId: string, rawText: string) {
+    const player = this.playerFromSocket(socketId);
+    if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
+    if (player.hp <= 0) return { ok: false as const, error: 'Öldün' };
+
+    const text = (rawText || '')
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 120);
+    if (!text) return { ok: false as const, error: 'Boş mesaj' };
+
+    const now = Date.now();
+    const last = this.chatCooldown.get(player.id) ?? 0;
+    if (now - last < 400) {
+      return { ok: false as const, error: 'Çok hızlı' };
+    }
+    this.chatCooldown.set(player.id, now);
+
+    return {
+      ok: true as const,
+      message: {
+        id: uuid(),
+        playerId: player.id,
+        name: player.name,
+        text,
+        mapId: player.mapId,
+        at: now,
+      },
+    };
+  }
+
   getSnapshot(mapId: MapId = DEFAULT_MAP_ID): Snapshot {
     const map = MAPS[mapId] ?? MAPS[DEFAULT_MAP_ID];
     return {
@@ -468,8 +501,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       y: 420 + Math.random() * 80,
       mapId: DEFAULT_MAP_ID,
       hp: stats.maxHp,
-      credits: 800,
-      gold: 25,
+      credits: 10000,
+      gold: 2000,
       kills: 0,
       loadoutJson: JSON.stringify(loadout),
     });
