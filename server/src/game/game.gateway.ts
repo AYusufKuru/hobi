@@ -9,12 +9,13 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { getCorsOrigins } from '../cors';
 import { GameService } from './game.service';
 import { PlayerInput } from './game.types';
 
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: getCorsOrigins(),
     credentials: true,
   },
 })

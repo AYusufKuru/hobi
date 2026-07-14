@@ -3,11 +3,12 @@ config();
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { getCorsOrigins } from './cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: getCorsOrigins(),
     credentials: true,
   });
   const port = Number(process.env.PORT ?? 3001);
