@@ -373,7 +373,7 @@ export function deriveStats(loadout: Loadout): DerivedStats {
 
   let speedPoints = ship.speed ?? 4;
   let maxShield = ship.maxShield ?? 0;
-  const maxHp = ship.maxHp ?? 5000;
+  const maxHp = ship.maxHp ?? 256_000;
   let damage = 0;
   let npcBonus = 0;
   let equippedLasers = 0;

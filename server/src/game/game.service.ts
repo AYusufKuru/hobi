@@ -43,7 +43,6 @@ import {
   bossSpawnPoint,
   CUBIKON_MINION_COUNT,
   CUBIKON_MINION_DESPAWN_MS,
-  CUBIKON_ORBIT_RADIUS,
   NPC_TEMPLATES,
   type NpcKind,
 } from './npc-catalog';
@@ -78,6 +77,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   private tickHandle: NodeJS.Timeout | null = null;
   private readonly tickMs = 1000 / 30;
   private persistCounter = 0;
+  /** Fractional radiation damage leftover until it reaches a whole HP point */
+  private radAccum = new Map<string, number>();
   private eventQueue: GameEvent[] = [];
 
   constructor(
@@ -841,6 +842,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     this.sockets.delete(socketId);
     this.inputs.delete(playerId);
     this.rocketLatch.delete(playerId);
+    this.radAccum.delete(playerId);
     const player = this.players.get(playerId);
     this.players.delete(playerId);
     for (const [id, b] of this.bullets) {
@@ -985,7 +987,15 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         player.x > WORLD.width - rad ||
         player.y > WORLD.height - rad
       ) {
-        this.applyDamage(player, WORLD.radiationDps * dt, events, 'radiation');
+        // Accumulate fractional DPS so HP stays an integer (Postgres int column).
+        const frac = (this.radAccum.get(player.id) ?? 0) + WORLD.radiationDps * dt;
+        const whole = Math.floor(frac);
+        this.radAccum.set(player.id, frac - whole);
+        if (whole > 0) {
+          this.applyDamage(player, whole, events, 'radiation');
+        }
+      } else {
+        this.radAccum.delete(player.id);
       }
 
       // Shield regen — after 3s without damage, +5% maxShield / sec (ok while moving)
@@ -1020,7 +1030,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       ) {
         player.lastRepairAt = now;
         const heal = Math.max(1, Math.round(player.maxHp * WORLD.repairPct));
-        player.hp = Math.min(player.maxHp, player.hp + heal);
+        player.hp = Math.min(player.maxHp, Math.round(player.hp + heal));
       }
 
       // Laser — visual beams lock to targetId at fire time; DPS is per-second
@@ -1469,12 +1479,27 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private randomPointNearBoss(boss: NpcState) {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 100 + Math.random() * 240;
+    return {
+      x: boss.x + Math.cos(ang) * dist,
+      y: boss.y + Math.sin(ang) * dist,
+    };
+  }
+
+  private pickProtegitWander(npc: NpcState, boss: NpcState, now: number) {
+    const p = this.randomPointNearBoss(boss);
+    npc.engageAnchorX = p.x;
+    npc.engageAnchorY = p.y;
+    npc.engageDist = 1;
+    npc.nextWanderAt = now + 350 + Math.random() * 900;
+  }
+
   private spawnCubikonMinions(boss: NpcState) {
     for (let i = 0; i < CUBIKON_MINION_COUNT; i++) {
-      const ang = (i / CUBIKON_MINION_COUNT) * Math.PI * 2;
-      const dist = CUBIKON_ORBIT_RADIUS + (i % 3) * 28;
       const id = `protegit-${boss.id}-${i}`;
-      this.npcs.set(id, this.makeProtegit(id, boss, ang, dist));
+      this.npcs.set(id, this.makeProtegit(id, boss));
     }
   }
 
@@ -1498,24 +1523,42 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     const boss = parent && parent.hp > 0 ? parent : null;
 
     if (boss) {
-      npc.orbitAngle += dt * 0.35;
-      if (now >= npc.nextWanderAt) {
-        npc.orbitAngle += (Math.random() - 0.5) * 1.4;
-        npc.orbitDist = CUBIKON_ORBIT_RADIUS + (Math.random() - 0.5) * 100;
-        npc.nextWanderAt = now + 700 + Math.random() * 1100;
+      const distFromBoss = Math.hypot(npc.x - boss.x, npc.y - boss.y);
+      const atTarget = Math.hypot(
+        npc.engageAnchorX - npc.x,
+        npc.engageAnchorY - npc.y,
+      );
+
+      if (
+        now >= npc.nextWanderAt ||
+        npc.engageDist <= 0 ||
+        atTarget < 28
+      ) {
+        this.pickProtegitWander(npc, boss, now);
       }
-      const tx = boss.x + Math.cos(npc.orbitAngle) * npc.orbitDist;
-      const ty = boss.y + Math.sin(npc.orbitAngle) * npc.orbitDist;
-      const dx = tx - npc.x;
-      const dy = ty - npc.y;
+
+      if (distFromBoss > 360) {
+        this.pickProtegitWander(npc, boss, now);
+      }
+
+      let dx = npc.engageAnchorX - npc.x;
+      let dy = npc.engageAnchorY - npc.y;
       const d = Math.hypot(dx, dy);
       if (d > 10) {
-        npc.vx = (dx / d) * tpl.wanderSpeed;
-        npc.vy = (dy / d) * tpl.wanderSpeed;
+        dx /= d;
+        dy /= d;
       } else {
-        npc.vx = Math.cos(npc.orbitAngle + Math.PI / 2) * tpl.wanderSpeed * 0.4;
-        npc.vy = Math.sin(npc.orbitAngle + Math.PI / 2) * tpl.wanderSpeed * 0.4;
+        const jitter = Math.random() * Math.PI * 2;
+        dx = Math.cos(jitter);
+        dy = Math.sin(jitter);
       }
+
+      dx += (Math.random() - 0.5) * 0.55;
+      dy += (Math.random() - 0.5) * 0.55;
+      const vmag = Math.hypot(dx, dy) || 1;
+      const spd = tpl.wanderSpeed * (0.65 + Math.random() * 0.45);
+      npc.vx = (dx / vmag) * spd;
+      npc.vy = (dy / vmag) * spd;
     } else if (now >= npc.nextWanderAt) {
       const ang = Math.random() * Math.PI * 2;
       npc.vx = Math.cos(ang) * tpl.wanderSpeed * 0.6;
@@ -1713,13 +1756,14 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   }
 
   private applyShieldAndHull(target: PlayerState, amount: number) {
+    amount = Math.max(0, Math.round(amount));
     if (amount <= 0) return;
     const absorb =
       target.shield > 0 && target.maxShield > 0
         ? Math.max(0, Math.min(100, target.shieldAbsorb)) / 100
         : 0;
     if (absorb <= 0 || target.shield <= 0) {
-      target.hp = Math.max(0, target.hp - amount);
+      target.hp = Math.max(0, Math.round(target.hp - amount));
       return;
     }
     let toShield = Math.round(amount * absorb);
@@ -1728,8 +1772,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       toHull += toShield - target.shield;
       toShield = target.shield;
     }
-    target.shield -= toShield;
-    if (toHull > 0) target.hp = Math.max(0, target.hp - toHull);
+    target.shield = Math.max(0, Math.round(target.shield - toShield));
+    if (toHull > 0) target.hp = Math.max(0, Math.round(target.hp - toHull));
   }
 
   private applyDamage(
@@ -1873,27 +1917,23 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     return this.baseNpcFields(id, mapId, 'cubikon', x, y, 0, 0, 0);
   }
 
-  private makeProtegit(
-    id: string,
-    boss: NpcState,
-    orbitAngle: number,
-    orbitDist: number,
-  ): NpcState {
-    const x = boss.x + Math.cos(orbitAngle) * orbitDist;
-    const y = boss.y + Math.sin(orbitAngle) * orbitDist;
+  private makeProtegit(id: string, boss: NpcState): NpcState {
+    const p = this.randomPointNearBoss(boss);
     const m = this.baseNpcFields(
       id,
       boss.mapId,
       'protegit',
-      x,
-      y,
-      orbitAngle,
+      p.x,
+      p.y,
+      Math.random() * Math.PI * 2,
       0,
       0,
     );
     m.parentId = boss.id;
-    m.orbitAngle = orbitAngle;
-    m.orbitDist = orbitDist;
+    m.engageAnchorX = p.x;
+    m.engageAnchorY = p.y;
+    m.engageDist = 1;
+    m.nextWanderAt = Date.now() + 200 + Math.random() * 600;
     m.aggroId = this.topCubikonDamager(boss) ?? boss.aggroId;
     return m;
   }
@@ -1924,19 +1964,25 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
   private async persistPlayer(player?: PlayerState) {
     if (!player) return;
-    await this.playerRepo.update(
-      { id: player.id },
-      {
-        x: player.x,
-        y: player.y,
-        mapId: player.mapId,
-        hp: Math.max(player.hp, 1),
-        credits: player.credits,
-        gold: player.gold,
-        kills: player.kills,
-        loadoutJson: JSON.stringify(this.toLoadout(player)),
-      },
-    );
+    // Keep runtime HP integer so future writes stay valid for Postgres int columns.
+    player.hp = Math.max(0, Math.round(player.hp));
+    try {
+      await this.playerRepo.update(
+        { id: player.id },
+        {
+          x: player.x,
+          y: player.y,
+          mapId: player.mapId,
+          hp: Math.max(player.hp, 1),
+          credits: Math.round(player.credits),
+          gold: Math.round(player.gold),
+          kills: Math.round(player.kills),
+          loadoutJson: JSON.stringify(this.toLoadout(player)),
+        },
+      );
+    } catch (err) {
+      console.error(`[persist] failed for ${player.id}:`, err);
+    }
   }
 
   private playerFromSocket(socketId: string) {
@@ -1977,7 +2023,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     ensureDroidFits(player.loadout);
     player.shieldAbsorb = stats.shieldAbsorb;
     player.shipSprite = stats.sprite;
-    player.hp = Math.min(player.hp, player.maxHp);
+    player.hp = Math.min(Math.round(player.hp), player.maxHp);
     if (stats.maxShield > prevMaxShield) {
       player.shield += stats.maxShield - prevMaxShield;
     }

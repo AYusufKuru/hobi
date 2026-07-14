@@ -40,7 +40,7 @@ export const NPC_TEMPLATES: Record<NpcKind, NpcTemplate> = {
   cubikon: {
     kind: 'cubikon',
     name: 'Cubikon',
-    maxHp: 120_000,
+    maxHp: 500_000,
     credits: 50_000,
     gold: 10_000,
     respawnMs: 30_000,
@@ -60,7 +60,7 @@ export const NPC_TEMPLATES: Record<NpcKind, NpcTemplate> = {
     credits: 400,
     gold: 80,
     respawnMs: 0,
-    laserDamage: 85,
+    laserDamage: 55,
     fireCooldownMs: 380,
     speed: 120,
     wanderSpeed: 90,
