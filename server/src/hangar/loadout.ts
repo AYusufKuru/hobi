@@ -38,7 +38,7 @@ export interface DerivedStats {
   laserNpcBonus: number;
   /** Number of filled laser slots */
   equippedLasers: number;
-  sprite: 'ship-player' | 'ship-elite';
+  sprite: 'ship-player' | 'ship-elite' | 'ship-goliath';
   ammoDamageMult: number;
   laserSlots: number;
   generatorSlots: number;

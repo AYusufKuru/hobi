@@ -29,11 +29,19 @@ export const WORLD = {
   /** Drop chase if player flees beyond this */
   npcLeashRange: 1100,
   npcLaserRange: 580,
+  /** Ideal engagement distance (~ half player laser range) */
+  npcPreferRange: 360,
+  /** Random hold distance = prefer ± this fraction */
+  npcPreferSlack: 0.2,
+  /** Prey moved this far from last pick → choose a new flank angle */
+  npcRepositionMove: 90,
   npcLaserDamage: 55,
   npcFireCooldownMs: 420,
   npcBulletSpeed: 820,
   killCredits: 25,
-  npcCredits: 10,
+  npcCredits: 1000,
+  /** Gold drop from NPCs (test values — tune later) */
+  npcGold: 1000,
   cargoCollectRadius: 45,
   shieldRegenDelayMs: 3000,
   /** Must stand still / not take damage this long before hull repair starts */
@@ -51,18 +59,55 @@ export const WORLD = {
   startingRockets: 20,
   portalRadius: 55,
   portalChannelMs: 3000,
-  /** Must be this close to the portal to start a jump */
-  portalUseRange: 140,
+  /** Distance from portal center to start a jump */
+  portalUseRange: 100,
 } as const;
 
+export const MAPS = {
+  'map-1': { id: 'map-1', name: '1-1', width: 5600, height: 5600 },
+  'map-2': { id: 'map-2', name: '1-2', width: 5600, height: 5600 },
+} as const;
+
+export type MapId = keyof typeof MAPS;
+
+export const DEFAULT_MAP_ID: MapId = 'map-1';
+
+/** Portals live on a map and jump to another (or same) map + coords */
 export const PORTALS = [
-  { id: 'portal-home', x: 500, y: 500, label: 'Home Base', toX: 5100, toY: 5100 },
-  { id: 'portal-far', x: 5100, y: 5100, label: 'Outer Gate', toX: 500, toY: 500 },
+  {
+    id: 'm1-to-m2',
+    mapId: 'map-1' as MapId,
+    x: 5100,
+    y: 5100,
+    label: '→ 1-2',
+    toMapId: 'map-2' as MapId,
+    toX: 500,
+    toY: 500,
+  },
+  {
+    id: 'm2-to-m1',
+    mapId: 'map-2' as MapId,
+    x: 500,
+    y: 500,
+    label: '→ 1-1',
+    toMapId: 'map-1' as MapId,
+    toX: 4900,
+    toY: 4900,
+  },
 ] as const;
+
+export function portalsOnMap(mapId: string) {
+  return PORTALS.filter((p) => p.mapId === mapId);
+}
+
+export function isMapId(id: string): id is MapId {
+  return id in MAPS;
+}
 
 export interface PlayerState {
   id: string;
   name: string;
+  mapId: MapId;
   x: number;
   y: number;
   vx: number;
@@ -78,7 +123,7 @@ export interface PlayerState {
   rockets: number;
   laserAmmo: number;
   shipId: string;
-  shipSprite: 'ship-player' | 'ship-elite';
+  shipSprite: 'ship-player' | 'ship-elite' | 'ship-goliath';
   shipSpeed: number;
   laserDamage: number;
   /** Extra laser damage vs NPCs */
@@ -109,6 +154,7 @@ export interface PlayerState {
 export interface BulletState {
   id: string;
   ownerId: string;
+  mapId: MapId;
   /** Locked when fired — lasers/rockets only affect this target */
   targetId: string;
   /** Homing point — frozen when target dies so beams finish at death spot */
@@ -130,6 +176,7 @@ export interface BulletState {
 export interface NpcState {
   id: string;
   name: string;
+  mapId: MapId;
   x: number;
   y: number;
   angle: number;
@@ -141,6 +188,13 @@ export interface NpcState {
   /** Player id being chased; null = wandering */
   aggroId: string | null;
   nextWanderAt: number;
+  /** Angle from prey to preferred hold spot (0 = needs pick) */
+  engageAngle: number;
+  /** Distance from prey for hold spot */
+  engageDist: number;
+  /** Prey position when engageAngle/Dist were last chosen */
+  engageAnchorX: number;
+  engageAnchorY: number;
 }
 
 export interface CargoBox {
@@ -178,10 +232,12 @@ export interface Snapshot {
   >;
   npcs: Omit<
     NpcState,
-    'vx' | 'vy' | 'lastShotAt' | 'lastDpsAt' | 'aggroId' | 'nextWanderAt'
+    'vx' | 'vy' | 'lastShotAt' | 'lastDpsAt' | 'aggroId' | 'nextWanderAt' | 'engageAngle' | 'engageDist' | 'engageAnchorX' | 'engageAnchorY'
   >[];
   cargo: CargoBox[];
-  portals: typeof PORTALS;
+  portals: Array<(typeof PORTALS)[number]>;
+  mapId: MapId;
+  mapName: string;
   serverTime: number;
 }
 
@@ -239,7 +295,13 @@ export type GameEvent =
       rockets: number;
     }
   | { type: 'loot'; playerId: string; credits: number; rockets: number }
-  | { type: 'portal'; playerId: string; portalId: string }
+  | {
+      type: 'portal';
+      playerId: string;
+      portalId: string;
+      mapId: MapId;
+      mapName: string;
+    }
   | {
       type: 'portalChannel';
       playerId: string;

@@ -27,6 +27,10 @@ export class PlayerEntity {
   @Column({ type: 'float', default: 0 })
   y: number;
 
+  /** Current map id (e.g. map-1) */
+  @Column({ type: 'varchar', default: 'map-1' })
+  mapId: string;
+
   @Column({ type: 'int', default: 100 })
   hp: number;
 

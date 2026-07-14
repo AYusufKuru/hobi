@@ -37,9 +37,11 @@ export interface WorldConfig {
 
 export interface PortalPublic {
   id: string;
+  mapId: string;
   x: number;
   y: number;
   label: string;
+  toMapId: string;
   toX: number;
   toY: number;
 }
@@ -47,6 +49,7 @@ export interface PortalPublic {
 export interface PlayerPublic {
   id: string;
   name: string;
+  mapId?: string;
   x: number;
   y: number;
   angle: number;
@@ -64,7 +67,7 @@ export interface PlayerPublic {
   laserDamage: number;
   laserNpcBonus?: number;
   equippedLasers?: number;
-  shipSprite: 'ship-player' | 'ship-elite';
+  shipSprite: 'ship-player' | 'ship-elite' | 'ship-goliath';
   color: string;
   targetId: string | null;
   firing: boolean;
@@ -107,6 +110,8 @@ export interface Snapshot {
   npcs: NpcPublic[];
   cargo: CargoPublic[];
   portals: PortalPublic[];
+  mapId?: string;
+  mapName?: string;
   serverTime: number;
 }
 

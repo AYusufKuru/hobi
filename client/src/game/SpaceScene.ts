@@ -18,6 +18,7 @@ export type SceneHud = {
     gold: number;
     kills: number;
     name: string;
+    mapName: string;
     targetName: string | null;
     firing: boolean;
     rockets: number;
@@ -67,9 +68,10 @@ const SHIP_ANGLE_OFFSET = Math.PI / 2;
 const PICK_RADIUS = 42;
 const DOUBLE_CLICK_MS = 320;
 const DOUBLE_CLICK_DIST = 48;
-const MINIMAP_W = 180;
-const MINIMAP_H = 120;
-const MINIMAP_PAD = 14;
+const MINIMAP_W = 168;
+const MINIMAP_H = 112;
+/** Screen-edge margin in CSS/camera pixels (after zoom) */
+const MINIMAP_PAD = 40;
 const ROCKET_HOLD_FRAMES = 4;
 
 export class SpaceScene extends Phaser.Scene {
@@ -130,6 +132,7 @@ export class SpaceScene extends Phaser.Scene {
     this.load.image('space-bg', '/assets/space-bg.jpg');
     this.load.image('ship-player', '/assets/ship-player.png');
     this.load.image('ship-elite', '/assets/ship-elite.png');
+    this.load.image('ship-goliath', '/assets/ship-goliath.png');
     this.load.image('ship-npc', '/assets/ship-npc.png');
     this.load.image('bullet', '/assets/bullet-cyan.png');
     this.load.image('explosion', '/assets/explosion.png');
@@ -280,11 +283,25 @@ export class SpaceScene extends Phaser.Scene {
 
     this.socket.on(
       'portal',
-      (payload: { label?: string; message?: string; playerId?: string }) => {
+      (payload: {
+        label?: string;
+        message?: string;
+        playerId?: string;
+        mapName?: string;
+      }) => {
         if (payload.playerId && payload.playerId !== this.selfId) return;
-        this.hud.onToast?.(payload.message ?? 'Işınlandın');
+        this.targetId = null;
+        this.firing = false;
+        this.destX = null;
+        this.destY = null;
+        this.hud.onToast?.(
+          payload.message ??
+            (payload.mapName
+              ? `Harita · ${payload.mapName}`
+              : 'Işınlandın'),
+        );
         this.cameras.main.flash(160, 80, 200, 255);
-        this.time.delayedCall(1400, () => this.hud.onToast?.(null));
+        this.time.delayedCall(1600, () => this.hud.onToast?.(null));
       },
     );
 
@@ -363,7 +380,26 @@ export class SpaceScene extends Phaser.Scene {
     this.destY = Phaser.Math.Clamp(world.y, 20, this.world.height - 20);
   }
 
+  /**
+   * Camera-space rect compensated for main zoom (scrollFactor 0 still scales).
+   */
   private minimapRect() {
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    const mw = MINIMAP_W / zoom;
+    const mh = MINIMAP_H / zoom;
+    const midX = cam.width * 0.5;
+    const midY = cam.height * 0.5;
+    return {
+      x: midX + (midX - MINIMAP_PAD) / zoom - mw,
+      y: midY + (midY - MINIMAP_PAD) / zoom - mh,
+      w: mw,
+      h: mh,
+    };
+  }
+
+  /** Screen-space rect for pointer.x / pointer.y hit tests */
+  private minimapScreenRect() {
     const cam = this.cameras.main;
     return {
       x: cam.width - MINIMAP_PAD - MINIMAP_W,
@@ -374,13 +410,13 @@ export class SpaceScene extends Phaser.Scene {
   }
 
   private isOverMinimap(sx: number, sy: number) {
-    const mm = this.minimapRect();
+    const mm = this.minimapScreenRect();
     return sx >= mm.x && sx <= mm.x + mm.w && sy >= mm.y && sy <= mm.y + mm.h;
   }
 
   private handleMinimapClick(sx: number, sy: number): boolean {
     if (!this.isOverMinimap(sx, sy)) return false;
-    const mm = this.minimapRect();
+    const mm = this.minimapScreenRect();
     const u = (sx - mm.x) / mm.w;
     const v = (sy - mm.y) / mm.h;
     this.holdSteer = false;
@@ -435,7 +471,7 @@ export class SpaceScene extends Phaser.Scene {
     x: number,
     y: number,
   ): { id: string; label: string } | null {
-    const r = (this.world.portalRadius ?? 55) + 20;
+    const r = this.world.portalUseRange ?? 100;
     let best: { id: string; label: string; d: number } | null = null;
     for (const portal of this.latest?.portals ?? []) {
       const d = Math.hypot(portal.x - x, portal.y - y);
@@ -558,6 +594,7 @@ export class SpaceScene extends Phaser.Scene {
       gold: self.gold ?? 0,
       kills: self.kills,
       name: self.name,
+      mapName: this.latest?.mapName ?? '1-1',
       targetName,
       firing: this.firing,
       rockets: self.rockets,
@@ -879,14 +916,6 @@ export class SpaceScene extends Phaser.Scene {
       g.fillStyle(0xa78bfa, 0.08 + pulse * 0.06);
       g.fillCircle(portal.x, portal.y, r * 0.5);
     }
-
-    for (const cargo of this.latest?.cargo ?? []) {
-      const s = 7;
-      g.fillStyle(0xffd166, 0.95);
-      g.fillRect(cargo.x - s / 2, cargo.y - s / 2, s, s);
-      g.lineStyle(1, 0xffaa00, 0.8);
-      g.strokeCircle(cargo.x, cargo.y, 9 + Math.sin(this.time.now / 160 + cargo.x) * 1.5);
-    }
   }
 
   private drawOverlays() {
@@ -930,8 +959,9 @@ export class SpaceScene extends Phaser.Scene {
 
     g.fillStyle(0x050a14, 0.82);
     g.fillRect(mm.x, mm.y, mm.w, mm.h);
+    // Stroke inset so the border never clips past the canvas edge
     g.lineStyle(1.5, 0x3dd6ff, 0.55);
-    g.strokeRect(mm.x, mm.y, mm.w, mm.h);
+    g.strokeRect(mm.x + 1, mm.y + 1, mm.w - 2, mm.h - 2);
 
     const inset = this.world.radiationInset ?? 0;
     if (inset > 0) {
@@ -945,11 +975,6 @@ export class SpaceScene extends Phaser.Scene {
     for (const portal of this.latest?.portals ?? []) {
       g.fillStyle(0xa78bfa, 0.9);
       g.fillCircle(mm.x + portal.x * sx, mm.y + portal.y * sy, 4);
-    }
-
-    for (const cargo of this.latest?.cargo ?? []) {
-      g.fillStyle(0xffd166, 1);
-      g.fillRect(mm.x + cargo.x * sx - 2, mm.y + cargo.y * sy - 2, 4, 4);
     }
 
     for (const n of this.latest?.npcs ?? []) {
@@ -983,16 +1008,18 @@ export class SpaceScene extends Phaser.Scene {
     let gfx = this.ships.get(player.id);
     const isSelf = player.id === this.selfId;
     const key = player.shipSprite || 'ship-player';
+    const size = key === 'ship-goliath' ? 78 : 64;
+    const glowSize = key === 'ship-goliath' ? 94 : 78;
 
     if (!gfx) {
       const root = this.add.container(player.x, player.y).setDepth(10);
       const glow = this.add
         .image(0, 0, key)
-        .setDisplaySize(78, 78)
+        .setDisplaySize(glowSize, glowSize)
         .setAlpha(0.35)
         .setTint(0x66e0ff)
         .setBlendMode(Phaser.BlendModes.ADD);
-      const sprite = this.add.image(0, 0, key).setDisplaySize(64, 64);
+      const sprite = this.add.image(0, 0, key).setDisplaySize(size, size);
       if (!isSelf) {
         const tint = Phaser.Display.Color.HexStringToColor(player.color).color;
         sprite.setTint(tint);
@@ -1012,7 +1039,7 @@ export class SpaceScene extends Phaser.Scene {
       thrust.setDepth(9);
 
       const label = this.add
-        .text(0, 42, player.name, {
+        .text(0, size * 0.65, player.name, {
           fontFamily: 'Orbitron, sans-serif',
           fontSize: isSelf ? '12px' : '11px',
           color: '#ffffff',
@@ -1037,8 +1064,9 @@ export class SpaceScene extends Phaser.Scene {
       };
       this.ships.set(player.id, gfx);
     } else if (gfx.sprite.texture.key !== key) {
-      gfx.sprite.setTexture(key);
-      gfx.glow.setTexture(key);
+      gfx.sprite.setTexture(key).setDisplaySize(size, size);
+      gfx.glow.setTexture(key).setDisplaySize(glowSize, glowSize);
+      gfx.label.setY(size * 0.65);
     }
 
     gfx.label.setText(player.name);

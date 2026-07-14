@@ -21,7 +21,7 @@ export interface ShopItem {
   maxShield?: number;
   laserSlots?: number;
   generatorSlots?: number;
-  sprite?: 'ship-player' | 'ship-elite';
+  sprite?: 'ship-player' | 'ship-elite' | 'ship-goliath';
   /** Damage contributed per equipped module */
   baseDamage?: number;
   /** Extra damage vs NPCs when this laser is equipped */
@@ -76,7 +76,7 @@ export const SHOP_CATALOG: ShopItem[] = [
     maxShield: 0,
     laserSlots: 16,
     generatorSlots: 6,
-    sprite: 'ship-elite',
+    sprite: 'ship-goliath',
   },
   {
     id: 'laser-lf1',

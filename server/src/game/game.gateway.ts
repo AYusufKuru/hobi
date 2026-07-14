@@ -11,7 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { getCorsOrigins } from '../cors';
 import { GameService } from './game.service';
-import { PlayerInput } from './game.types';
+import { DEFAULT_MAP_ID, PlayerInput } from './game.types';
 
 @WebSocketGateway({
   cors: {
@@ -54,12 +54,15 @@ export class GameGateway
           this.server.emit('portalCancel', event);
         }
       }
-      this.server.emit('snapshot', this.game.getSnapshot());
+      for (const sock of this.server.sockets.sockets.values()) {
+        const mapId = this.game.getMapIdForSocket(sock.id) ?? DEFAULT_MAP_ID;
+        sock.emit('snapshot', this.game.getSnapshot(mapId));
+      }
     }, 33);
   }
 
   handleConnection(client: Socket) {
-    client.emit('snapshot', this.game.getSnapshot());
+    client.emit('snapshot', this.game.getSnapshot(DEFAULT_MAP_ID));
   }
 
   handleDisconnect(client: Socket) {

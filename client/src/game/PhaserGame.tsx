@@ -25,11 +25,12 @@ export default function PhaserGame({
   useEffect(() => {
     if (!hostRef.current || gameRef.current) return;
 
+    const host = hostRef.current;
     const game = new Phaser.Game({
       type: Phaser.AUTO,
-      parent: hostRef.current,
-      width: window.innerWidth,
-      height: window.innerHeight,
+      parent: host,
+      width: host.clientWidth || window.innerWidth,
+      height: host.clientHeight || window.innerHeight,
       backgroundColor: '#05070f',
       physics: {
         default: 'arcade',
@@ -38,7 +39,10 @@ export default function PhaserGame({
       scene: [SpaceScene],
       scale: {
         mode: Phaser.Scale.RESIZE,
+        parent: host,
         autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: host.clientWidth || window.innerWidth,
+        height: host.clientHeight || window.innerHeight,
       },
     });
 

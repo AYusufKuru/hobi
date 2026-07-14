@@ -27,6 +27,7 @@ type HudStats = {
   gold: number;
   kills: number;
   name: string;
+  mapName: string;
   targetName: string | null;
   firing: boolean;
   rockets: number;
@@ -54,6 +55,7 @@ export default function App() {
     gold: 0,
     kills: 0,
     name: '',
+    mapName: '1-1',
     targetName: null,
     firing: false,
     rockets: 0,
@@ -127,6 +129,7 @@ export default function App() {
       gold: self.gold ?? 0,
       kills: self.kills,
       name: self.name,
+      mapName: result.snapshot?.mapName ?? '1-1',
       targetName: null,
       firing: false,
       rockets: self.rockets,
@@ -197,8 +200,10 @@ export default function App() {
       <div className="game-shell">
         <div className="hud">
           <div className="hud-panel">
-            <div className="label">Pilot</div>
-            <div className="value">{stats.name}</div>
+            <div className="label">Pilot · Harita</div>
+            <div className="value">
+              {stats.name} · {stats.mapName}
+            </div>
             <div className="vital-block">
               <div className="vital-head">
                 <span className="vital-label shd">Kalkan</span>

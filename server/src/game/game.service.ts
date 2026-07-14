@@ -19,11 +19,16 @@ import {
 import {
   BulletState,
   CargoBox,
+  DEFAULT_MAP_ID,
   GameEvent,
+  isMapId,
+  MAPS,
+  MapId,
   NpcState,
   PlayerInput,
   PlayerState,
   PORTALS,
+  portalsOnMap,
   Snapshot,
   WORLD,
 } from './game.types';
@@ -281,7 +286,9 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     const player = this.playerFromSocket(socketId);
     if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
     if (player.hp <= 0) return { ok: false as const, error: 'Öldün' };
-    const portal = PORTALS.find((p) => p.id === portalId);
+    const portal = PORTALS.find(
+      (p) => p.id === portalId && p.mapId === player.mapId,
+    );
     if (!portal) return { ok: false as const, error: 'Portal yok' };
     const dist = Math.hypot(player.x - portal.x, player.y - portal.y);
     if (dist > WORLD.portalUseRange) {
@@ -321,49 +328,58 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  getSnapshot(): Snapshot {
+  getMapIdForSocket(socketId: string): MapId | null {
+    const player = this.playerFromSocket(socketId);
+    return player?.mapId ?? null;
+  }
+
+  getSnapshot(mapId: MapId = DEFAULT_MAP_ID): Snapshot {
+    const map = MAPS[mapId] ?? MAPS[DEFAULT_MAP_ID];
     return {
-      players: [...this.players.values()].map((p) => {
-        const {
-          lastShotAt,
-          lastLaserDpsAt,
-          lastRocketAt,
-          lastDamageAt,
-          lastMovedAt,
-          lastRepairAt,
-          lastShieldRegenAt,
-          vx,
-          vy,
-          lastPortalAt,
-          portalChannelId,
-          portalChannelEndsAt,
-          loadout: _loadout,
-          ...rest
-        } = p;
-        void lastShotAt;
-        void lastLaserDpsAt;
-        void lastRocketAt;
-        void lastDamageAt;
-        void lastMovedAt;
-        void lastRepairAt;
-        void lastShieldRegenAt;
-        void lastPortalAt;
-        void portalChannelId;
-        void portalChannelEndsAt;
-        void _loadout;
-        const aim = this.resolveTargetPos(p.targetId);
-        const inRange = !!(
-          aim &&
-          Math.hypot(aim.x - p.x, aim.y - p.y) <= WORLD.laserRange
-        );
-        return {
-          ...rest,
-          moving: Math.hypot(vx, vy) > 12,
-          inRange,
-        };
-      }),
-      bullets: [...this.bullets.values()].map(
-        ({ id, ownerId, targetId, aimX, aimY, frozen, x, y, kind }) => ({
+      players: [...this.players.values()]
+        .filter((p) => p.mapId === mapId)
+        .map((p) => {
+          const {
+            lastShotAt,
+            lastLaserDpsAt,
+            lastRocketAt,
+            lastDamageAt,
+            lastMovedAt,
+            lastRepairAt,
+            lastShieldRegenAt,
+            vx,
+            vy,
+            lastPortalAt,
+            portalChannelId,
+            portalChannelEndsAt,
+            loadout: _loadout,
+            ...rest
+          } = p;
+          void lastShotAt;
+          void lastLaserDpsAt;
+          void lastRocketAt;
+          void lastDamageAt;
+          void lastMovedAt;
+          void lastRepairAt;
+          void lastShieldRegenAt;
+          void lastPortalAt;
+          void portalChannelId;
+          void portalChannelEndsAt;
+          void _loadout;
+          const aim = this.resolveTargetPos(p.targetId, p.mapId);
+          const inRange = !!(
+            aim &&
+            Math.hypot(aim.x - p.x, aim.y - p.y) <= WORLD.laserRange
+          );
+          return {
+            ...rest,
+            moving: Math.hypot(vx, vy) > 12,
+            inRange,
+          };
+        }),
+      bullets: [...this.bullets.values()]
+        .filter((b) => b.mapId === mapId)
+        .map(({ id, ownerId, targetId, aimX, aimY, frozen, x, y, kind }) => ({
           id,
           ownerId,
           targetId,
@@ -373,21 +389,28 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           x,
           y,
           kind,
-        }),
-      ),
-      npcs: [...this.npcs.values()].map(
-        ({
-          vx: _vx,
-          vy: _vy,
-          lastShotAt: _ls,
-          lastDpsAt: _ld,
-          aggroId: _ag,
-          nextWanderAt: _nw,
-          ...rest
-        }) => rest,
-      ),
+        })),
+      npcs: [...this.npcs.values()]
+        .filter((n) => n.mapId === mapId)
+        .map(
+          ({
+            vx: _vx,
+            vy: _vy,
+            lastShotAt: _ls,
+            lastDpsAt: _ld,
+            aggroId: _ag,
+            nextWanderAt: _nw,
+            engageAngle: _ea,
+            engageDist: _ed,
+            engageAnchorX: _eax,
+            engageAnchorY: _eay,
+            ...rest
+          }) => rest,
+        ),
       cargo: [...this.cargo.values()],
-      portals: PORTALS,
+      portals: [...portalsOnMap(mapId)],
+      mapId,
+      mapName: map.name,
       serverTime: Date.now(),
     };
   }
@@ -443,6 +466,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       passwordHash: await hashPassword(password),
       x: 420 + Math.random() * 80,
       y: 420 + Math.random() * 80,
+      mapId: DEFAULT_MAP_ID,
       hp: stats.maxHp,
       credits: 800,
       gold: 25,
@@ -490,6 +514,9 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     entity.hp = stats.maxHp;
     entity.x = 420 + Math.random() * 80;
     entity.y = 420 + Math.random() * 80;
+    if (!entity.mapId || !isMapId(entity.mapId)) {
+      entity.mapId = DEFAULT_MAP_ID;
+    }
     entity.loadoutJson = JSON.stringify(loadout);
     if (entity.credits < 50) {
       entity.credits = Math.max(entity.credits, 200);
@@ -497,10 +524,12 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     if (entity.gold == null) entity.gold = 25;
     await this.playerRepo.save(entity);
 
+    const mapId: MapId = isMapId(entity.mapId) ? entity.mapId : DEFAULT_MAP_ID;
     const color = COLORS[Math.abs(this.hash(name)) % COLORS.length];
     const player: PlayerState = {
       id: entity.id,
       name: entity.name,
+      mapId,
       x: entity.x,
       y: entity.y,
       vx: 0,
@@ -570,7 +599,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       ok: true as const,
       self,
       world: WORLD,
-      snapshot: this.getSnapshot(),
+      snapshot: this.getSnapshot(mapId),
       hangar: this.getHangarState(socketId),
     };
   }
@@ -636,7 +665,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       player.targetId = input.targetId;
       player.firing = input.firing && !!input.targetId;
 
-      const aim = this.resolveTargetPos(player.targetId);
+      const aim = this.resolveTargetPos(player.targetId, player.mapId);
       if (player.targetId && !aim) {
         player.targetId = null;
         player.firing = false;
@@ -689,21 +718,30 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         player.portalChannelEndsAt > 0 &&
         now >= player.portalChannelEndsAt
       ) {
-        const portal = PORTALS.find((p) => p.id === player.portalChannelId);
+        const portal = PORTALS.find(
+          (p) => p.id === player.portalChannelId && p.mapId === player.mapId,
+        );
         player.portalChannelId = null;
         player.portalChannelEndsAt = 0;
         if (portal) {
+          player.mapId = portal.toMapId;
           player.x = portal.toX + (Math.random() - 0.5) * 40;
           player.y = portal.toY + (Math.random() - 0.5) * 40;
           player.vx = 0;
           player.vy = 0;
+          player.targetId = null;
+          player.firing = false;
           player.lastPortalAt = now;
           input.destX = null;
           input.destY = null;
+          input.targetId = null;
+          input.firing = false;
           events.push({
             type: 'portal',
             playerId: player.id,
             portalId: portal.id,
+            mapId: portal.toMapId,
+            mapName: MAPS[portal.toMapId].name,
           });
         }
       }
@@ -774,6 +812,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         for (const side of [-1, 1] as const) {
           this.spawnProjectileFrom(
             player.id,
+            player.mapId,
             player.x + perpX * side,
             player.y + perpY * side,
             aim!.x,
@@ -825,6 +864,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           player.rockets -= 1;
           this.spawnProjectileFrom(
             player.id,
+            player.mapId,
             player.x,
             player.y,
             aim.x,
@@ -847,33 +887,11 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       }
       this.rocketLatch.set(player.id, wantRocket);
 
-      // Collect cargo boxes
-      for (const [cid, box] of this.cargo) {
-        if (
-          Math.hypot(player.x - box.x, player.y - box.y) <= WORLD.cargoCollectRadius
-        ) {
-          player.credits += box.credits;
-          player.rockets += box.rockets;
-          this.cargo.delete(cid);
-          events.push({
-            type: 'loot',
-            playerId: player.id,
-            credits: box.credits,
-            rockets: box.rockets,
-          });
-          events.push({
-            type: 'credits',
-            playerId: player.id,
-            credits: player.credits,
-            gold: player.gold,
-            kills: player.kills,
-            rockets: player.rockets,
-          });
-        }
-      }
+      // Cargo boxes disabled for now (resources later)
+
     }
 
-    // NPCs — passive until damaged by a player, then chase + shoot
+    // NPCs — passive until damaged by a player, then flank + shoot
     for (const npc of this.npcs.values()) {
       if (npc.hp <= 0) continue;
 
@@ -883,25 +901,45 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         const d = prey && prey.hp > 0
           ? Math.hypot(prey.x - npc.x, prey.y - npc.y)
           : Infinity;
-        if (!prey || prey.hp <= 0 || d > WORLD.npcLeashRange) {
+        if (!prey || prey.hp <= 0 || prey.mapId !== npc.mapId || d > WORLD.npcLeashRange) {
           npc.aggroId = null;
           npc.nextWanderAt = 0;
+          npc.engageDist = 0;
         }
       }
 
       const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
-      if (prey && prey.hp > 0) {
-        const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
-        const ang = Math.atan2(prey.y - npc.y, prey.x - npc.x);
-        npc.vx = Math.cos(ang) * WORLD.npcSpeed;
-        npc.vy = Math.sin(ang) * WORLD.npcSpeed;
-        npc.angle = ang;
+      if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
+        const preyMoved =
+          Math.hypot(prey.x - npc.engageAnchorX, prey.y - npc.engageAnchorY) >=
+          WORLD.npcRepositionMove;
+        if (npc.engageDist <= 0 || preyMoved) {
+          this.pickNpcEngage(npc, prey.x, prey.y);
+        }
 
+        const holdX =
+          prey.x + Math.cos(npc.engageAngle) * npc.engageDist;
+        const holdY =
+          prey.y + Math.sin(npc.engageAngle) * npc.engageDist;
+        const toHoldX = holdX - npc.x;
+        const toHoldY = holdY - npc.y;
+        const toHold = Math.hypot(toHoldX, toHoldY);
+        if (toHold > 22) {
+          npc.vx = (toHoldX / toHold) * WORLD.npcSpeed;
+          npc.vy = (toHoldY / toHold) * WORLD.npcSpeed;
+        } else {
+          npc.vx = 0;
+          npc.vy = 0;
+        }
+        npc.angle = Math.atan2(prey.y - npc.y, prey.x - npc.x);
+
+        const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
         if (d <= WORLD.npcLaserRange) {
           if (now - npc.lastShotAt >= WORLD.npcFireCooldownMs) {
             npc.lastShotAt = now;
             this.spawnProjectileFrom(
               npc.id,
+              npc.mapId,
               npc.x,
               npc.y,
               prey.x,
@@ -955,7 +993,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     // Projectiles — home to live target, or frozen death spot
     for (const [id, bullet] of this.bullets) {
       if (!bullet.frozen) {
-        const live = this.resolveTargetPos(bullet.targetId);
+        const live = this.resolveTargetPos(bullet.targetId, bullet.mapId);
         if (live) {
           bullet.aimX = live.x;
           bullet.aimY = live.y;
@@ -1030,6 +1068,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     if (!player.targetId) return;
     this.spawnProjectileFrom(
       player.id,
+      player.mapId,
       player.x,
       player.y,
       aim.x,
@@ -1044,6 +1083,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
   private spawnProjectileFrom(
     ownerId: string,
+    mapId: MapId,
     x: number,
     y: number,
     aimX: number,
@@ -1059,6 +1099,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     this.bullets.set(id, {
       id,
       ownerId,
+      mapId,
       targetId,
       aimX,
       aimY,
@@ -1125,6 +1166,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     if (!npc || npc.hp <= 0) return;
     // Taking damage from a player pulls aggro
     if (this.players.has(byId)) {
+      if (npc.aggroId !== byId) npc.engageDist = 0;
       npc.aggroId = byId;
     }
     const amount = damage + (npcExtra > 0 ? npcExtra : 0);
@@ -1139,12 +1181,11 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       damage: amount,
     });
     if (npc.hp <= 0) {
-      const deathX = npc.x;
-      const deathY = npc.y;
-      this.freezeBulletsOnTarget(npc.id, deathX, deathY);
+      this.freezeBulletsOnTarget(npc.id, npc.x, npc.y);
       const killer = this.players.get(byId);
       if (killer) {
         killer.credits += WORLD.npcCredits;
+        killer.gold += WORLD.npcGold;
         events.push({
           type: 'credits',
           playerId: killer.id,
@@ -1160,12 +1201,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         killerId: byId,
         kind: 'npc',
       });
-      this.spawnCargo(
-        deathX,
-        deathY,
-        WORLD.npcCredits,
-        1 + Math.floor(Math.random() * 2),
-      );
       this.clearLocksOn(npc.id);
       this.respawnNpc(npc);
     }
@@ -1213,7 +1248,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         kind: 'player',
       });
       events.push({ type: 'youDied', victimId: target.id });
-      this.spawnCargo(target.x, target.y, Math.floor(WORLD.killCredits / 2), 2);
       this.clearLocksOn(target.id);
       this.scheduleRespawn(target.id);
     }
@@ -1258,17 +1292,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private spawnCargo(x: number, y: number, credits: number, rockets: number) {
-    const id = uuid();
-    this.cargo.set(id, {
-      id,
-      x: x + (Math.random() - 0.5) * 30,
-      y: y + (Math.random() - 0.5) * 30,
-      credits,
-      rockets,
-    });
-  }
-
   private clearLocksOn(targetId: string) {
     for (const player of this.players.values()) {
       if (player.targetId === targetId) {
@@ -1284,12 +1307,18 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private resolveTargetPos(targetId: string | null) {
+  private resolveTargetPos(targetId: string | null, mapId?: MapId) {
     if (!targetId) return null;
     const player = this.players.get(targetId);
-    if (player && player.hp > 0) return { x: player.x, y: player.y };
+    if (player && player.hp > 0) {
+      if (mapId && player.mapId !== mapId) return null;
+      return { x: player.x, y: player.y };
+    }
     const npc = this.npcs.get(targetId);
-    if (npc && npc.hp > 0) return { x: npc.x, y: npc.y };
+    if (npc && npc.hp > 0) {
+      if (mapId && npc.mapId !== mapId) return null;
+      return { x: npc.x, y: npc.y };
+    }
     return null;
   }
 
@@ -1299,6 +1328,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       if (!player) return;
       player.hp = player.maxHp;
       player.shield = player.maxShield;
+      player.mapId = DEFAULT_MAP_ID;
       player.x = 420 + Math.random() * 80;
       player.y = 420 + Math.random() * 80;
       player.vx = 0;
@@ -1310,19 +1340,24 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   }
 
   private spawnNpcs() {
-    for (let i = 0; i < WORLD.npcCount; i++) {
-      this.npcs.set(`npc-${i}`, this.makeNpc(`npc-${i}`));
+    for (const mapId of Object.keys(MAPS) as MapId[]) {
+      for (let i = 0; i < WORLD.npcCount; i++) {
+        const id = `npc-${mapId}-${i}`;
+        this.npcs.set(id, this.makeNpc(id, mapId));
+      }
     }
   }
 
-  private makeNpc(id: string): NpcState {
+  private makeNpc(id: string, mapId: MapId): NpcState {
     const angle = Math.random() * Math.PI * 2;
     const spd = WORLD.npcWanderSpeed;
+    const map = MAPS[mapId];
     return {
       id,
       name: 'Streuner',
-      x: 600 + Math.random() * (WORLD.width - 1200),
-      y: 600 + Math.random() * (WORLD.height - 1200),
+      mapId,
+      x: 600 + Math.random() * (map.width - 1200),
+      y: 600 + Math.random() * (map.height - 1200),
       angle,
       hp: WORLD.npcHp,
       vx: Math.cos(angle) * spd,
@@ -1331,11 +1366,24 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       lastDpsAt: 0,
       aggroId: null,
       nextWanderAt: Date.now() + 1000 + Math.random() * 2000,
+      engageAngle: 0,
+      engageDist: 0,
+      engageAnchorX: 0,
+      engageAnchorY: 0,
     };
   }
 
+  private pickNpcEngage(npc: NpcState, preyX: number, preyY: number) {
+    const slack = WORLD.npcPreferSlack;
+    const prefer = WORLD.npcPreferRange;
+    npc.engageDist = prefer * (1 - slack + Math.random() * slack * 2);
+    npc.engageAngle = Math.random() * Math.PI * 2;
+    npc.engageAnchorX = preyX;
+    npc.engageAnchorY = preyY;
+  }
+
   private respawnNpc(npc: NpcState) {
-    Object.assign(npc, this.makeNpc(npc.id));
+    Object.assign(npc, this.makeNpc(npc.id, npc.mapId));
   }
 
   private async persistAll() {
@@ -1351,6 +1399,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       {
         x: player.x,
         y: player.y,
+        mapId: player.mapId,
         hp: Math.max(player.hp, 1),
         credits: player.credits,
         gold: player.gold,
