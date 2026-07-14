@@ -9,7 +9,7 @@ export const MAX_DROIDS = 8;
 export type ShopCurrency = 'silver' | 'gold';
 
 /** Converts ship speed points (base + gens) into world px/s */
-export const SPEED_PER_POINT = 16;
+export const SPEED_PER_POINT = 10;
 
 export interface ShopItem {
   id: string;
@@ -251,50 +251,50 @@ export const SHOP_CATALOG: ShopItem[] = [
     id: 'gen-shd-1000',
     category: 'generators',
     name: 'Void Veil I',
-    desc: '1.000 kalkan · %40 absorb',
+    desc: '3.000 kalkan · %40 absorb',
     price: 120,
     currency: 'silver',
-    shieldBonus: 1000,
+    shieldBonus: 3000,
     absorbPct: 40,
   },
   {
     id: 'gen-shd-2000',
     category: 'generators',
     name: 'Void Veil II',
-    desc: '2.000 kalkan · %50 absorb',
+    desc: '6.000 kalkan · %50 absorb',
     price: 280,
     currency: 'silver',
-    shieldBonus: 2000,
+    shieldBonus: 6000,
     absorbPct: 50,
   },
   {
     id: 'gen-shd-5000',
     category: 'generators',
     name: 'Void Veil III',
-    desc: '5.000 kalkan · %60 absorb',
+    desc: '15.000 kalkan · %60 absorb',
     price: 550,
     currency: 'silver',
-    shieldBonus: 5000,
+    shieldBonus: 15000,
     absorbPct: 60,
   },
   {
     id: 'gen-shd-4000',
     category: 'generators',
     name: 'Bastion Field',
-    desc: '4.000 kalkan · %70 absorb',
+    desc: '12.000 kalkan · %70 absorb',
     price: 45,
     currency: 'gold',
-    shieldBonus: 4000,
+    shieldBonus: 12000,
     absorbPct: 70,
   },
   {
     id: 'gen-shd-10000',
     category: 'generators',
     name: 'Aegis Dome',
-    desc: '10.000 kalkan · %80 absorb',
+    desc: '30.000 kalkan · %80 absorb',
     price: 95,
     currency: 'gold',
-    shieldBonus: 10000,
+    shieldBonus: 30000,
     absorbPct: 80,
   },
   {

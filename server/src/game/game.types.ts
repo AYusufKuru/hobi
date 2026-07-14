@@ -9,8 +9,10 @@ export const WORLD = {
   bulletLifetimeMs: 1400,
   rocketLifetimeMs: 2200,
   fireCooldownMs: 500,
-  /** RSB rapid-fire interval while bursting */
+  /** RSB rapid-fire beam interval while bursting */
   rsbFireCooldownMs: 100,
+  /** RSB damage tick interval (independent from normal laser) */
+  rsbDpsIntervalMs: 1500,
   /** RSB continuous fire window */
   rsbBurstMs: 1500,
   /** Cooldown after an RSB burst ends */
@@ -145,7 +147,10 @@ export interface PlayerState {
   loadout: import('../hangar/loadout').Loadout;
   color: string;
   lastShotAt: number;
-  lastLaserDpsAt: number;
+  /** Last normal ammo (x1–x4) damage tick */
+  lastNormalLaserDpsAt: number;
+  /** Last RSB damage tick — independent from normal laser */
+  lastRsbDpsAt: number;
   lastRocketAt: number;
   lastDamageAt: number;
   lastMovedAt: number;
@@ -239,7 +244,8 @@ export interface Snapshot {
     Omit<
       PlayerState,
       | 'lastShotAt'
-      | 'lastLaserDpsAt'
+      | 'lastNormalLaserDpsAt'
+      | 'lastRsbDpsAt'
       | 'lastRocketAt'
       | 'lastDamageAt'
       | 'lastMovedAt'
@@ -303,7 +309,8 @@ export interface JoinResult {
   self?: Omit<
     PlayerState,
     | 'lastShotAt'
-    | 'lastLaserDpsAt'
+    | 'lastNormalLaserDpsAt'
+    | 'lastRsbDpsAt'
     | 'lastRocketAt'
     | 'lastDamageAt'
     | 'lastMovedAt'

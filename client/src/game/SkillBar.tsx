@@ -141,14 +141,14 @@ export default function SkillBar({
     });
   }
 
-  /** Same laser again while firing → stop. Else select + start fire. */
+  /** Same laser again while firing → stop. Else select; start only if not already firing. */
   async function activateAmmo(ammoId: string) {
     if (activeIdRef.current === ammoId && firingRef.current) {
       emitCombat('stop');
       return;
     }
     await select(ammoId);
-    emitCombat('start');
+    if (!firingRef.current) emitCombat('start');
   }
 
   async function assignSlot(slot: number, ammoId: string | null) {

@@ -148,7 +148,6 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
     player.activeAmmoId = ammoId;
     player.loadout.activeAmmoId = ammoId;
-    player.rsbBurstUntil = 0;
     player.laserAmmo = activeAmmoCount(player.loadout);
     this.applyLoadoutStats(player);
     void this.persistPlayer(player);
@@ -553,7 +552,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         .map((p) => {
           const {
             lastShotAt,
-            lastLaserDpsAt,
+            lastNormalLaserDpsAt,
+            lastRsbDpsAt,
             lastRocketAt,
             lastDamageAt,
             lastMovedAt,
@@ -570,7 +570,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
             ...rest
           } = p;
           void lastShotAt;
-          void lastLaserDpsAt;
+          void lastNormalLaserDpsAt;
+          void lastRsbDpsAt;
           void lastRocketAt;
           void lastDamageAt;
           void lastMovedAt;
@@ -782,7 +783,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       loadout,
       color,
       lastShotAt: 0,
-      lastLaserDpsAt: 0,
+      lastNormalLaserDpsAt: 0,
+      lastRsbDpsAt: 0,
       lastRocketAt: 0,
       lastDamageAt: 0,
       lastMovedAt: Date.now(),
@@ -810,7 +812,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
     const {
       lastShotAt: _a,
-      lastLaserDpsAt: _dps,
+      lastNormalLaserDpsAt: _dps,
+      lastRsbDpsAt: _rdps,
       lastRocketAt: _b,
       lastDamageAt: _c,
       lastMovedAt: _m,
@@ -1068,8 +1071,11 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
       const shotCd = isRsb ? WORLD.rsbFireCooldownMs : WORLD.fireCooldownMs;
       const dpsCd = isRsb
-        ? WORLD.rsbFireCooldownMs
+        ? WORLD.rsbDpsIntervalMs
         : WORLD.laserDpsIntervalMs;
+      const lastDpsAt = isRsb
+        ? player.lastRsbDpsAt
+        : player.lastNormalLaserDpsAt;
       const laserTint = getAmmoColor(ammoId);
 
       if (canLaser && now - player.lastShotAt >= shotCd) {
@@ -1095,8 +1101,9 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (canLaser && now - player.lastLaserDpsAt >= dpsCd) {
-        player.lastLaserDpsAt = now;
+      if (canLaser && now - lastDpsAt >= dpsCd) {
+        if (isRsb) player.lastRsbDpsAt = now;
+        else player.lastNormalLaserDpsAt = now;
         const consume = isRsb ? 2 : 1;
         const have = player.loadout.ammo[ammoId] ?? 0;
         if (have > 0) {
@@ -1105,17 +1112,13 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           player.loadout.laserAmmo = player.laserAmmo;
           if (player.loadout.ammo[ammoId] === 0) this.applyLoadoutStats(player);
         }
+        const { damage, npcBonus } = this.laserDamageForAmmo(player, ammoId);
         this.dealLockedDamage(
           player.id,
           player.targetId!,
-          player.laserDamage,
-          player.laserNpcBonus,
+          damage,
+          npcBonus,
           events,
-        );
-      } else if (!canLaser) {
-        player.lastLaserDpsAt = Math.min(
-          player.lastLaserDpsAt,
-          now - dpsCd,
         );
       }
 
@@ -1354,6 +1357,23 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private laserDamageForAmmo(
+    player: PlayerState,
+    ammoId: string,
+  ): { damage: number; npcBonus: number } {
+    if (!isSkillAmmoId(ammoId)) {
+      return { damage: player.laserDamage, npcBonus: player.laserNpcBonus };
+    }
+    const stats = deriveStats({ ...player.loadout, activeAmmoId: ammoId });
+    return { damage: stats.laserDamage, npcBonus: stats.laserNpcBonus };
+  }
+
+  private rollDamageVariance(base: number, spread = 0.15): number {
+    if (base <= 0) return 0;
+    const mult = 1 + (Math.random() * 2 - 1) * spread;
+    return Math.max(1, Math.round(base * mult));
+  }
+
   private dealLockedDamage(
     byId: string,
     targetId: string,
@@ -1361,10 +1381,13 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     npcExtra: number,
     events: GameEvent[],
   ) {
-    if (damage <= 0) return;
+    const rolled = this.rollDamageVariance(
+      damage + (npcExtra > 0 ? npcExtra : 0),
+    );
+    if (rolled <= 0) return;
     const playerTarget = this.players.get(targetId);
     if (playerTarget && playerTarget.hp > 0) {
-      this.damagePlayer(playerTarget, damage, byId, events);
+      this.damagePlayer(playerTarget, rolled, byId, events);
       return;
     }
     const npc = this.npcs.get(targetId);
@@ -1373,12 +1396,11 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       if (npc.aggroId !== byId) npc.engageDist = 0;
       npc.aggroId = byId;
       if (npc.kind === 'cubikon') {
-        npc.damageByPlayer[byId] = (npc.damageByPlayer[byId] ?? 0) + damage;
+        npc.damageByPlayer[byId] = (npc.damageByPlayer[byId] ?? 0) + rolled;
         this.enrageCubikon(npc, events);
       }
     }
-    const amount = damage + (npcExtra > 0 ? npcExtra : 0);
-    npc.hp = Math.max(0, npc.hp - amount);
+    npc.hp = Math.max(0, npc.hp - rolled);
     events.push({
       type: 'hit',
       targetId: npc.id,
@@ -1386,7 +1408,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       shield: 0,
       byId,
       kind: 'npc',
-      damage: amount,
+      damage: rolled,
     });
     if (npc.hp <= 0) {
       this.onNpcKilled(npc, byId, events);
