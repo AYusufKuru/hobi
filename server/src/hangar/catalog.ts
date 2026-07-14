@@ -1,4 +1,11 @@
-export type ShopCategory = 'ships' | 'lasers' | 'generators' | 'ammo';
+export type ShopCategory =
+  | 'ships'
+  | 'lasers'
+  | 'generators'
+  | 'ammo'
+  | 'droids';
+
+export const MAX_DROIDS = 8;
 export type ShopCurrency = 'silver' | 'gold';
 
 /** Converts ship speed points (base + gens) into world px/s */
@@ -290,6 +297,14 @@ export const SHOP_CATALOG: ShopItem[] = [
     shieldBonus: 10000,
     absorbPct: 80,
   },
+  {
+    id: 'droid-basic',
+    category: 'droids',
+    name: 'Flax',
+    desc: `Eşlikçi droid · tek tek alınır · max ${MAX_DROIDS}`,
+    price: 250,
+    currency: 'silver',
+  },
 ];
 
 /** Old save ids → current catalog ids */
@@ -317,6 +332,17 @@ export function shipSlotCounts(shipId: string) {
   const ship = getCatalogItem(shipId) ?? getCatalogItem('ship-phoenix')!;
   return {
     laserSlots: ship.laserSlots ?? 1,
-    generatorSlots: ship.generatorSlots ?? 1,
+    generatorSlots: ship.generatorSlots ?? 6,
   };
+}
+
+/** Droid slots: lasers + shield generators only (no speed gens) */
+export function isDroidModuleAllowed(itemId: string): boolean {
+  const item = getCatalogItem(itemId);
+  if (!item) return false;
+  if (item.category === 'lasers') return true;
+  if (item.category === 'generators') {
+    return (item.shieldBonus ?? 0) > 0 && (item.speedBonus ?? 0) === 0;
+  }
+  return false;
 }

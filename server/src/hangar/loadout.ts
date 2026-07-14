@@ -1,6 +1,7 @@
 import {
   getCatalogItem,
   marketCatalog,
+  MAX_DROIDS,
   shipSlotCounts,
   SPEED_PER_POINT,
   type ShopItem,
@@ -9,6 +10,15 @@ import {
 export interface ShipFit {
   lasers: (string | null)[];
   generators: (string | null)[];
+}
+
+export interface DroidFit {
+  /** Two module slots — laser or shield each */
+  slots: [string | null, string | null];
+}
+
+export function emptyDroidFit(): DroidFit {
+  return { slots: [null, null] };
 }
 
 export const SKILL_AMMO_IDS = [
@@ -41,6 +51,10 @@ export interface Loadout {
   activeAmmoId: SkillAmmoId;
   /** Skill bar slot assignments (ammo ids) */
   skillBar: (SkillAmmoId | null)[];
+  /** Owned escort droids (0–MAX_DROIDS), bought one by one */
+  droidCount: number;
+  /** Per-droid equipment — same laser/generator modules as the ship */
+  droidFits: DroidFit[];
 }
 
 export interface DerivedStats {
@@ -122,6 +136,64 @@ function ensureFit(loadout: Loadout, shipId: string): ShipFit {
   return fit;
 }
 
+function ensureDroidFits(loadout: Loadout): DroidFit[] {
+  if (!Array.isArray(loadout.droidFits)) {
+    loadout.droidFits = [];
+  }
+  while (loadout.droidFits.length < MAX_DROIDS) {
+    loadout.droidFits.push(emptyDroidFit());
+  }
+  if (loadout.droidFits.length > MAX_DROIDS) {
+    const overflow = loadout.droidFits.splice(MAX_DROIDS);
+    for (const fit of overflow) {
+      for (const id of fit.slots) {
+        if (!id) continue;
+        const item = getCatalogItem(id);
+        if (item?.category === 'lasers') {
+          addDepot(loadout.lasers, id, 1);
+        } else if (item?.category === 'generators') {
+          addDepot(loadout.generators, id, 1);
+        }
+      }
+    }
+  }
+  for (const fit of loadout.droidFits) {
+    if (!Array.isArray(fit.slots) || fit.slots.length < 2) {
+      fit.slots = [fit.slots?.[0] ?? null, fit.slots?.[1] ?? null];
+    } else {
+      fit.slots = [fit.slots[0] ?? null, fit.slots[1] ?? null];
+    }
+  }
+  return loadout.droidFits;
+}
+
+function migrateLegacyDroidDepots(loadout: Loadout) {
+  const raw = loadout as Loadout & {
+    droidLasers?: Record<string, number>;
+    droidShields?: Record<string, number>;
+  };
+  for (const [id, n] of Object.entries(raw.droidLasers ?? {})) {
+    const item = getCatalogItem(id);
+    if (item?.category === 'lasers') addDepot(loadout.lasers, id, n);
+  }
+  for (const [id, n] of Object.entries(raw.droidShields ?? {})) {
+    const item = getCatalogItem(id);
+    if (item?.category === 'generators') addDepot(loadout.generators, id, n);
+  }
+  delete raw.droidLasers;
+  delete raw.droidShields;
+  for (const fit of loadout.droidFits ?? []) {
+    for (let i = 0; i < 2; i++) {
+      const id = fit.slots[i];
+      if (!id) continue;
+      const item = getCatalogItem(id);
+      if (item?.category !== 'lasers' && item?.category !== 'generators') {
+        fit.slots[i] = null;
+      }
+    }
+  }
+}
+
 function addDepot(bag: Record<string, number>, id: string, n: number) {
   bag[id] = (bag[id] ?? 0) + n;
   if (bag[id] <= 0) delete bag[id];
@@ -144,6 +216,8 @@ export function defaultLoadout(): Loadout {
     ammo: defaultAmmoStocks(),
     activeAmmoId: 'ammo-x1',
     skillBar: defaultSkillBar(),
+    droidCount: 0,
+    droidFits: Array.from({ length: MAX_DROIDS }, () => emptyDroidFit()),
   };
   return loadout;
 }
@@ -212,6 +286,8 @@ function migrateV1(parsed: Record<string, unknown>): Loadout {
     ammo: defaultAmmoStocks(),
     activeAmmoId: 'ammo-x1',
     skillBar: defaultSkillBar(),
+    droidCount: 0,
+    droidFits: Array.from({ length: MAX_DROIDS }, () => emptyDroidFit()),
   };
 }
 
@@ -272,6 +348,16 @@ export function parseLoadout(raw: string | null | undefined): Loadout {
       while (loadout.skillBar.length < 5) loadout.skillBar.push(null);
     }
     loadout.laserAmmo = activeAmmoCount(loadout);
+    const rawDroids =
+      typeof (loadout as { droidCount?: unknown }).droidCount === 'number'
+        ? (loadout as { droidCount: number }).droidCount
+        : 0;
+    loadout.droidCount = Math.max(
+      0,
+      Math.min(MAX_DROIDS, Math.floor(rawDroids)),
+    );
+    migrateLegacyDroidDepots(loadout);
+    ensureDroidFits(loadout);
     loadout.version = 2;
     return loadout;
   } catch {
@@ -309,6 +395,27 @@ export function deriveStats(loadout: Loadout): DerivedStats {
     speedPoints += g.speedBonus ?? 0;
     maxShield += g.shieldBonus ?? 0;
     if ((g.absorbPct ?? 0) > bestAbsorb) bestAbsorb = g.absorbPct ?? 0;
+  }
+
+  const droidFits = ensureDroidFits(loadout);
+  const droidN = Math.max(
+    0,
+    Math.min(MAX_DROIDS, Math.floor(loadout.droidCount ?? 0)),
+  );
+  for (let di = 0; di < droidN; di++) {
+    for (const modId of droidFits[di].slots) {
+      if (!modId) continue;
+      const mod = getCatalogItem(modId);
+      if (!mod) continue;
+      if (mod.category === 'lasers') {
+        equippedLasers += 1;
+        damage += mod.baseDamage ?? 0;
+        npcBonus += mod.npcBonus ?? 0;
+      } else if (mod.category === 'generators') {
+        maxShield += mod.shieldBonus ?? 0;
+        if ((mod.absorbPct ?? 0) > bestAbsorb) bestAbsorb = mod.absorbPct ?? 0;
+      }
+    }
   }
 
   const ammoDamageMult = getAmmoMult(loadout.activeAmmoId);
@@ -350,4 +457,4 @@ export function takeFromDepot(
   return true;
 }
 
-export { ensureFit, emptyFit };
+export { ensureFit, emptyFit, ensureDroidFits };

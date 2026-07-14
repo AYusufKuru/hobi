@@ -6,12 +6,15 @@ import { hashPassword, verifyPassword } from '../auth/password';
 import { PlayerEntity } from '../player/player.entity';
 import {
   getCatalogItem,
+  isDroidModuleAllowed,
+  MAX_DROIDS,
 } from '../hangar/catalog';
 import {
   activeAmmoCount,
   addToDepot,
   catalogForClient,
   deriveStats,
+  ensureDroidFits,
   ensureFit,
   getAmmoColor,
   isSkillAmmoId,
@@ -36,6 +39,14 @@ import {
   Snapshot,
   WORLD,
 } from './game.types';
+import {
+  bossSpawnPoint,
+  CUBIKON_MINION_COUNT,
+  CUBIKON_MINION_DESPAWN_MS,
+  CUBIKON_ORBIT_RADIUS,
+  NPC_TEMPLATES,
+  type NpcKind,
+} from './npc-catalog';
 
 const COLORS = [
   '#4fc3f7',
@@ -120,6 +131,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         skillBar: player.loadout.skillBar,
         laserSlots: stats.laserSlots,
         generatorSlots: stats.generatorSlots,
+        droidCount: player.droidCount,
       },
     };
   }
@@ -217,6 +229,22 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       pay();
       player.loadout.ships.push(item.id);
       ensureFit(player.loadout, item.id);
+      this.applyLoadoutStats(player);
+      void this.persistPlayer(player);
+      return { ok: true as const, hangar: this.getHangarState(socketId) };
+    }
+
+    if (item.category === 'droids') {
+      if ((player.loadout.droidCount ?? 0) >= MAX_DROIDS) {
+        return {
+          ok: false as const,
+          error: `Maksimum ${MAX_DROIDS} droid`,
+        };
+      }
+      pay();
+      player.loadout.droidCount = (player.loadout.droidCount ?? 0) + 1;
+      player.droidCount = player.loadout.droidCount;
+      ensureDroidFits(player.loadout);
       this.applyLoadoutStats(player);
       void this.persistPlayer(player);
       return { ok: true as const, hangar: this.getHangarState(socketId) };
@@ -329,6 +357,95 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     if (!current) return { ok: false as const, error: 'Yuva boş' };
     slots[slotIndex] = null;
     addToDepot(depot, current, 1);
+    this.applyLoadoutStats(player);
+    void this.persistPlayer(player);
+    return { ok: true as const, hangar: this.getHangarState(socketId) };
+  }
+
+  equipDroidSlot(
+    socketId: string,
+    body: { droidIndex?: number; slotIndex?: number; itemId?: string },
+  ) {
+    const player = this.playerFromSocket(socketId);
+    if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
+    const droidIndex = Number(body.droidIndex);
+    const slotIndex = Number(body.slotIndex);
+    const itemId = body.itemId ?? '';
+    if (
+      droidIndex < 0 ||
+      droidIndex >= player.droidCount ||
+      droidIndex >= MAX_DROIDS
+    ) {
+      return { ok: false as const, error: 'Droid yok' };
+    }
+    if (slotIndex !== 0 && slotIndex !== 1) {
+      return { ok: false as const, error: 'Geçersiz yuva' };
+    }
+    const item = getCatalogItem(itemId);
+    if (!item) return { ok: false as const, error: 'Modül yok' };
+    if (!isDroidModuleAllowed(itemId)) {
+      return {
+        ok: false as const,
+        error: 'Droidlere sadece lazer veya kalkan jeneratörü',
+      };
+    }
+    const depot =
+      item.category === 'lasers'
+        ? player.loadout.lasers
+        : item.category === 'generators'
+          ? player.loadout.generators
+          : null;
+    if (!depot) {
+      return { ok: false as const, error: 'Bu yuvaya lazer veya kalkan' };
+    }
+    if (!takeFromDepot(depot, itemId, 1)) {
+      return { ok: false as const, error: 'Depoda yok' };
+    }
+    const fits = ensureDroidFits(player.loadout);
+    const fit = fits[droidIndex];
+    const previous = fit.slots[slotIndex];
+    if (previous) {
+      const prevItem = getCatalogItem(previous);
+      if (prevItem?.category === 'lasers') {
+        addToDepot(player.loadout.lasers, previous, 1);
+      } else if (prevItem?.category === 'generators') {
+        addToDepot(player.loadout.generators, previous, 1);
+      }
+    }
+    fit.slots[slotIndex] = itemId;
+    this.applyLoadoutStats(player);
+    void this.persistPlayer(player);
+    return { ok: true as const, hangar: this.getHangarState(socketId) };
+  }
+
+  unequipDroidSlot(
+    socketId: string,
+    body: { droidIndex?: number; slotIndex?: number },
+  ) {
+    const player = this.playerFromSocket(socketId);
+    if (!player) return { ok: false as const, error: 'Oyunda değilsin' };
+    const droidIndex = Number(body.droidIndex);
+    const slotIndex = Number(body.slotIndex);
+    if (
+      droidIndex < 0 ||
+      droidIndex >= player.droidCount ||
+      droidIndex >= MAX_DROIDS
+    ) {
+      return { ok: false as const, error: 'Droid yok' };
+    }
+    if (slotIndex !== 0 && slotIndex !== 1) {
+      return { ok: false as const, error: 'Geçersiz yuva' };
+    }
+    const fits = ensureDroidFits(player.loadout);
+    const current = fits[droidIndex].slots[slotIndex];
+    if (!current) return { ok: false as const, error: 'Yuva boş' };
+    const item = getCatalogItem(current);
+    if (item?.category === 'lasers') {
+      addToDepot(player.loadout.lasers, current, 1);
+    } else if (item?.category === 'generators') {
+      addToDepot(player.loadout.generators, current, 1);
+    }
+    fits[droidIndex].slots[slotIndex] = null;
     this.applyLoadoutStats(player);
     void this.persistPlayer(player);
     return { ok: true as const, hangar: this.getHangarState(socketId) };
@@ -492,7 +609,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
           tint,
         })),
       npcs: [...this.npcs.values()]
-        .filter((n) => n.mapId === mapId)
+        .filter((n) => n.mapId === mapId && n.hp > 0)
         .map(
           ({
             vx: _vx,
@@ -505,6 +622,13 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
             engageDist: _ed,
             engageAnchorX: _eax,
             engageAnchorY: _eay,
+            respawnAt: _ra,
+            parentId: _pi,
+            orbitAngle: _oa,
+            orbitDist: _od,
+            minionDespawnAt: _md,
+            damageByPlayer: _db,
+            minionsSpawned: _ms,
             ...rest
           }) => rest,
         ),
@@ -652,6 +776,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       laserDamage: stats.laserDamage,
       laserNpcBonus: stats.laserNpcBonus,
       equippedLasers: stats.equippedLasers,
+      droidCount: loadout.droidCount ?? 0,
       shieldAbsorb: stats.shieldAbsorb,
       loadout,
       color,
@@ -1027,100 +1152,32 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
 
     // NPCs — passive until damaged by a player, then flank + shoot
-    for (const npc of this.npcs.values()) {
-      if (npc.hp <= 0) continue;
-
-      // Keep / lose aggro (aggro only set when hit by a player)
-      if (npc.aggroId) {
-        const prey = this.players.get(npc.aggroId);
-        const d = prey && prey.hp > 0
-          ? Math.hypot(prey.x - npc.x, prey.y - npc.y)
-          : Infinity;
-        if (!prey || prey.hp <= 0 || prey.mapId !== npc.mapId || d > WORLD.npcLeashRange) {
-          npc.aggroId = null;
-          npc.nextWanderAt = 0;
-          npc.engageDist = 0;
-        }
+    for (const npc of [...this.npcs.values()]) {
+      if (npc.kind === 'protegit' && npc.minionDespawnAt > 0 && now >= npc.minionDespawnAt) {
+        this.npcs.delete(npc.id);
+        this.clearLocksOn(npc.id);
+        continue;
       }
 
-      const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
-      if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
-        const preyMoved =
-          Math.hypot(prey.x - npc.engageAnchorX, prey.y - npc.engageAnchorY) >=
-          WORLD.npcRepositionMove;
-        if (npc.engageDist <= 0 || preyMoved) {
-          this.pickNpcEngage(npc, prey.x, prey.y);
+      if (npc.hp <= 0) {
+        if (npc.kind === 'cubikon' && npc.respawnAt > 0 && now >= npc.respawnAt) {
+          this.despawnMinions(npc.id);
+          Object.assign(npc, this.makeCubikon(npc.id, npc.mapId));
         }
-
-        const holdX =
-          prey.x + Math.cos(npc.engageAngle) * npc.engageDist;
-        const holdY =
-          prey.y + Math.sin(npc.engageAngle) * npc.engageDist;
-        const toHoldX = holdX - npc.x;
-        const toHoldY = holdY - npc.y;
-        const toHold = Math.hypot(toHoldX, toHoldY);
-        if (toHold > 22) {
-          npc.vx = (toHoldX / toHold) * WORLD.npcSpeed;
-          npc.vy = (toHoldY / toHold) * WORLD.npcSpeed;
-        } else {
-          npc.vx = 0;
-          npc.vy = 0;
-        }
-        npc.angle = Math.atan2(prey.y - npc.y, prey.x - npc.x);
-
-        const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
-        if (d <= WORLD.npcLaserRange) {
-          if (now - npc.lastShotAt >= WORLD.npcFireCooldownMs) {
-            npc.lastShotAt = now;
-            this.spawnProjectileFrom(
-              npc.id,
-              npc.mapId,
-              npc.x,
-              npc.y,
-              prey.x,
-              prey.y,
-              'laser',
-              0,
-              WORLD.npcBulletSpeed,
-              0,
-              prey.id,
-            );
-          }
-          if (now - npc.lastDpsAt >= WORLD.laserDpsIntervalMs) {
-            npc.lastDpsAt = now;
-            this.dealLockedDamage(
-              npc.id,
-              prey.id,
-              WORLD.npcLaserDamage,
-              0,
-              events,
-            );
-          }
-        }
-      } else {
-        // Random wander
-        if (now >= npc.nextWanderAt) {
-          const ang = Math.random() * Math.PI * 2;
-          npc.vx = Math.cos(ang) * WORLD.npcWanderSpeed;
-          npc.vy = Math.sin(ang) * WORLD.npcWanderSpeed;
-          npc.angle = ang;
-          npc.nextWanderAt = now + 1800 + Math.random() * 3200;
-        }
+        continue;
       }
 
-      npc.x = this.clamp(npc.x + npc.vx * dt, 20, WORLD.width - 20);
-      npc.y = this.clamp(npc.y + npc.vy * dt, 20, WORLD.height - 20);
-      if (npc.x <= 20 || npc.x >= WORLD.width - 20) {
-        npc.vx *= -1;
-        npc.angle = Math.atan2(npc.vy, npc.vx);
+      if (npc.kind === 'cubikon') {
+        this.tickCubikon(npc, now);
+        continue;
       }
-      if (npc.y <= 20 || npc.y >= WORLD.height - 20) {
-        npc.vy *= -1;
-        npc.angle = Math.atan2(npc.vy, npc.vx);
+
+      if (npc.kind === 'protegit') {
+        this.tickProtegit(npc, now, dt, events);
+        continue;
       }
-      if (!npc.aggroId) {
-        npc.angle = Math.atan2(npc.vy, npc.vx);
-      }
+
+      this.tickStreuner(npc, now, dt, events);
     }
 
     this.flushPendingHits(now, events);
@@ -1302,10 +1359,13 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
     const npc = this.npcs.get(targetId);
     if (!npc || npc.hp <= 0) return;
-    // Taking damage from a player pulls aggro
     if (this.players.has(byId)) {
       if (npc.aggroId !== byId) npc.engageDist = 0;
       npc.aggroId = byId;
+      if (npc.kind === 'cubikon') {
+        npc.damageByPlayer[byId] = (npc.damageByPlayer[byId] ?? 0) + damage;
+        this.enrageCubikon(npc, events);
+      }
     }
     const amount = damage + (npcExtra > 0 ? npcExtra : 0);
     npc.hp = Math.max(0, npc.hp - amount);
@@ -1319,28 +1379,289 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       damage: amount,
     });
     if (npc.hp <= 0) {
-      this.freezeBulletsOnTarget(npc.id, npc.x, npc.y);
-      const killer = this.players.get(byId);
-      if (killer) {
-        killer.credits += WORLD.npcCredits;
-        killer.gold += WORLD.npcGold;
-        events.push({
-          type: 'credits',
-          playerId: killer.id,
-          credits: killer.credits,
-          gold: killer.gold,
-          kills: killer.kills,
-          rockets: killer.rockets,
-        });
-      }
+      this.onNpcKilled(npc, byId, events);
+    }
+  }
+
+  private onNpcKilled(npc: NpcState, byId: string, events: GameEvent[]) {
+    this.freezeBulletsOnTarget(npc.id, npc.x, npc.y);
+    const tpl = NPC_TEMPLATES[npc.kind];
+    const killer = this.players.get(byId);
+    if (killer) {
+      killer.credits += tpl.credits;
+      killer.gold += tpl.gold;
       events.push({
-        type: 'killed',
-        victimId: npc.id,
-        killerId: byId,
-        kind: 'npc',
+        type: 'credits',
+        playerId: killer.id,
+        credits: killer.credits,
+        gold: killer.gold,
+        kills: killer.kills,
+        rockets: killer.rockets,
       });
-      this.clearLocksOn(npc.id);
-      this.respawnNpc(npc);
+    }
+    events.push({
+      type: 'killed',
+      victimId: npc.id,
+      killerId: byId,
+      kind: 'npc',
+    });
+    this.clearLocksOn(npc.id);
+
+    if (npc.kind === 'cubikon') {
+      npc.respawnAt = Date.now() + tpl.respawnMs;
+      this.scheduleMinionDespawn(npc.id);
+      return;
+    }
+    if (npc.kind === 'protegit') {
+      return;
+    }
+    this.respawnNpc(npc);
+  }
+
+  private enrageCubikon(boss: NpcState, _events: GameEvent[]) {
+    if (boss.minionsSpawned) {
+      this.syncProtegitAggro(boss);
+      return;
+    }
+    boss.enraged = true;
+    boss.npcSprite = 'cubikon-angry';
+    boss.minionsSpawned = true;
+    this.spawnCubikonMinions(boss);
+    this.syncProtegitAggro(boss);
+  }
+
+  private topCubikonDamager(boss: NpcState): string | null {
+    let best: { id: string; dmg: number } | null = null;
+    for (const [id, dmg] of Object.entries(boss.damageByPlayer)) {
+      const p = this.players.get(id);
+      if (!p || p.hp <= 0 || p.mapId !== boss.mapId) continue;
+      if (!best || dmg > best.dmg) best = { id, dmg };
+    }
+    return best?.id ?? null;
+  }
+
+  private syncProtegitAggro(boss: NpcState) {
+    const target = this.topCubikonDamager(boss) ?? boss.aggroId;
+    if (!target) return;
+    for (const m of this.npcs.values()) {
+      if (m.parentId === boss.id && m.hp > 0) {
+        m.aggroId = target;
+        m.engageDist = 0;
+      }
+    }
+  }
+
+  private scheduleMinionDespawn(bossId: string) {
+    const at = Date.now() + CUBIKON_MINION_DESPAWN_MS;
+    for (const m of this.npcs.values()) {
+      if (m.parentId === bossId && m.hp > 0) {
+        m.minionDespawnAt = at;
+      }
+    }
+  }
+
+  private despawnMinions(bossId: string) {
+    for (const [id, m] of this.npcs.entries()) {
+      if (m.parentId === bossId) {
+        this.clearLocksOn(id);
+        this.npcs.delete(id);
+      }
+    }
+  }
+
+  private spawnCubikonMinions(boss: NpcState) {
+    for (let i = 0; i < CUBIKON_MINION_COUNT; i++) {
+      const ang = (i / CUBIKON_MINION_COUNT) * Math.PI * 2;
+      const dist = CUBIKON_ORBIT_RADIUS + (i % 3) * 28;
+      const id = `protegit-${boss.id}-${i}`;
+      this.npcs.set(id, this.makeProtegit(id, boss, ang, dist));
+    }
+  }
+
+  private tickCubikon(npc: NpcState, now: number) {
+    npc.vx = 0;
+    npc.vy = 0;
+    if (!npc.enraged) {
+      npc.npcSprite = 'cubikon-idle';
+    }
+    void now;
+  }
+
+  private tickProtegit(
+    npc: NpcState,
+    now: number,
+    dt: number,
+    events: GameEvent[],
+  ) {
+    const tpl = NPC_TEMPLATES.protegit;
+    const parent = npc.parentId ? this.npcs.get(npc.parentId) : null;
+    const boss = parent && parent.hp > 0 ? parent : null;
+
+    if (boss) {
+      npc.orbitAngle += dt * 0.35;
+      if (now >= npc.nextWanderAt) {
+        npc.orbitAngle += (Math.random() - 0.5) * 1.4;
+        npc.orbitDist = CUBIKON_ORBIT_RADIUS + (Math.random() - 0.5) * 100;
+        npc.nextWanderAt = now + 700 + Math.random() * 1100;
+      }
+      const tx = boss.x + Math.cos(npc.orbitAngle) * npc.orbitDist;
+      const ty = boss.y + Math.sin(npc.orbitAngle) * npc.orbitDist;
+      const dx = tx - npc.x;
+      const dy = ty - npc.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 10) {
+        npc.vx = (dx / d) * tpl.wanderSpeed;
+        npc.vy = (dy / d) * tpl.wanderSpeed;
+      } else {
+        npc.vx = Math.cos(npc.orbitAngle + Math.PI / 2) * tpl.wanderSpeed * 0.4;
+        npc.vy = Math.sin(npc.orbitAngle + Math.PI / 2) * tpl.wanderSpeed * 0.4;
+      }
+    } else if (now >= npc.nextWanderAt) {
+      const ang = Math.random() * Math.PI * 2;
+      npc.vx = Math.cos(ang) * tpl.wanderSpeed * 0.6;
+      npc.vy = Math.sin(ang) * tpl.wanderSpeed * 0.6;
+      npc.nextWanderAt = now + 1200 + Math.random() * 1800;
+    }
+
+    const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
+    if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
+      npc.angle = Math.atan2(prey.y - npc.y, prey.x - npc.x);
+      const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
+      if (d <= tpl.laserRange && tpl.laserDamage > 0) {
+        if (now - npc.lastShotAt >= tpl.fireCooldownMs) {
+          npc.lastShotAt = now;
+          this.spawnProjectileFrom(
+            npc.id,
+            npc.mapId,
+            npc.x,
+            npc.y,
+            prey.x,
+            prey.y,
+            'laser',
+            0,
+            WORLD.npcBulletSpeed,
+            0,
+            prey.id,
+          );
+        }
+        if (now - npc.lastDpsAt >= WORLD.laserDpsIntervalMs) {
+          npc.lastDpsAt = now;
+          this.dealLockedDamage(npc.id, prey.id, tpl.laserDamage, 0, events);
+        }
+      }
+    } else {
+      npc.angle = Math.atan2(npc.vy, npc.vx);
+    }
+
+    npc.x = this.clamp(npc.x + npc.vx * dt, 20, WORLD.width - 20);
+    npc.y = this.clamp(npc.y + npc.vy * dt, 20, WORLD.height - 20);
+  }
+
+  private tickStreuner(
+    npc: NpcState,
+    now: number,
+    dt: number,
+    events: GameEvent[],
+  ) {
+    this.tickHostileNpc(npc, now, dt, events, NPC_TEMPLATES.streuner);
+    npc.x = this.clamp(npc.x + npc.vx * dt, 20, WORLD.width - 20);
+    npc.y = this.clamp(npc.y + npc.vy * dt, 20, WORLD.height - 20);
+    if (npc.x <= 20 || npc.x >= WORLD.width - 20) {
+      npc.vx *= -1;
+      npc.angle = Math.atan2(npc.vy, npc.vx);
+    }
+    if (npc.y <= 20 || npc.y >= WORLD.height - 20) {
+      npc.vy *= -1;
+      npc.angle = Math.atan2(npc.vy, npc.vx);
+    }
+    if (!npc.aggroId) {
+      npc.angle = Math.atan2(npc.vy, npc.vx);
+    }
+  }
+
+  private tickHostileNpc(
+    npc: NpcState,
+    now: number,
+    dt: number,
+    events: GameEvent[],
+    tpl: (typeof NPC_TEMPLATES)[NpcKind],
+  ) {
+    void dt;
+    const leash = tpl.leashRange;
+    if (npc.aggroId) {
+      const prey = this.players.get(npc.aggroId);
+      const d = prey && prey.hp > 0
+        ? Math.hypot(prey.x - npc.x, prey.y - npc.y)
+        : Infinity;
+      if (!prey || prey.hp <= 0 || prey.mapId !== npc.mapId || d > leash) {
+        npc.aggroId = null;
+        npc.nextWanderAt = 0;
+        npc.engageDist = 0;
+      }
+    }
+
+    const prey = npc.aggroId ? this.players.get(npc.aggroId) : null;
+    if (prey && prey.hp > 0 && prey.mapId === npc.mapId) {
+      const preyMoved =
+        Math.hypot(prey.x - npc.engageAnchorX, prey.y - npc.engageAnchorY) >=
+        WORLD.npcRepositionMove;
+      if (npc.engageDist <= 0 || preyMoved) {
+        this.pickNpcEngage(npc, prey.x, prey.y, tpl.preferRange);
+      }
+
+      const holdX = prey.x + Math.cos(npc.engageAngle) * npc.engageDist;
+      const holdY = prey.y + Math.sin(npc.engageAngle) * npc.engageDist;
+      const toHoldX = holdX - npc.x;
+      const toHoldY = holdY - npc.y;
+      const toHold = Math.hypot(toHoldX, toHoldY);
+      if (toHold > 22) {
+        npc.vx = (toHoldX / toHold) * tpl.speed;
+        npc.vy = (toHoldY / toHold) * tpl.speed;
+      } else {
+        npc.vx = 0;
+        npc.vy = 0;
+      }
+      npc.angle = Math.atan2(prey.y - npc.y, prey.x - npc.x);
+
+      const d = Math.hypot(prey.x - npc.x, prey.y - npc.y);
+      if (d <= tpl.laserRange && tpl.laserDamage > 0) {
+        if (now - npc.lastShotAt >= tpl.fireCooldownMs) {
+          npc.lastShotAt = now;
+          this.spawnProjectileFrom(
+            npc.id,
+            npc.mapId,
+            npc.x,
+            npc.y,
+            prey.x,
+            prey.y,
+            'laser',
+            0,
+            WORLD.npcBulletSpeed,
+            0,
+            prey.id,
+          );
+        }
+        if (now - npc.lastDpsAt >= WORLD.laserDpsIntervalMs) {
+          npc.lastDpsAt = now;
+          this.dealLockedDamage(npc.id, prey.id, tpl.laserDamage, 0, events);
+        }
+      }
+    } else if (npc.kind === 'streuner') {
+      if (now >= npc.nextWanderAt) {
+        const ang = Math.random() * Math.PI * 2;
+        npc.vx = Math.cos(ang) * tpl.wanderSpeed;
+        npc.vy = Math.sin(ang) * tpl.wanderSpeed;
+        npc.angle = ang;
+        npc.nextWanderAt = now + 1800 + Math.random() * 3200;
+      }
+    } else if (npc.kind === 'protegit' && !npc.parentId) {
+      if (now >= npc.nextWanderAt) {
+        const ang = Math.random() * Math.PI * 2;
+        npc.vx = Math.cos(ang) * tpl.wanderSpeed;
+        npc.vy = Math.sin(ang) * tpl.wanderSpeed;
+        npc.angle = ang;
+        npc.nextWanderAt = now + 1200 + Math.random() * 1800;
+      }
     }
   }
 
@@ -1483,23 +1804,35 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         const id = `npc-${mapId}-${i}`;
         this.npcs.set(id, this.makeNpc(id, mapId));
       }
+      const bossId = `boss-${mapId}-cubikon`;
+      this.npcs.set(bossId, this.makeCubikon(bossId, mapId));
     }
   }
 
-  private makeNpc(id: string, mapId: MapId): NpcState {
-    const angle = Math.random() * Math.PI * 2;
-    const spd = WORLD.npcWanderSpeed;
-    const map = MAPS[mapId];
+  private baseNpcFields(
+    id: string,
+    mapId: MapId,
+    kind: NpcKind,
+    x: number,
+    y: number,
+    angle: number,
+    vx: number,
+    vy: number,
+  ): NpcState {
+    const tpl = NPC_TEMPLATES[kind];
     return {
       id,
-      name: 'Streuner',
+      name: tpl.name,
+      kind,
       mapId,
-      x: 600 + Math.random() * (map.width - 1200),
-      y: 600 + Math.random() * (map.height - 1200),
+      x,
+      y,
       angle,
-      hp: WORLD.npcHp,
-      vx: Math.cos(angle) * spd,
-      vy: Math.sin(angle) * spd,
+      hp: tpl.maxHp,
+      maxHp: tpl.maxHp,
+      npcSprite: tpl.sprite,
+      vx,
+      vy,
       lastShotAt: 0,
       lastDpsAt: 0,
       aggroId: null,
@@ -1508,12 +1841,70 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       engageDist: 0,
       engageAnchorX: 0,
       engageAnchorY: 0,
+      respawnAt: 0,
+      parentId: null,
+      enraged: false,
+      orbitAngle: 0,
+      orbitDist: 0,
+      minionDespawnAt: 0,
+      damageByPlayer: {},
+      minionsSpawned: false,
     };
   }
 
-  private pickNpcEngage(npc: NpcState, preyX: number, preyY: number) {
+  private makeNpc(id: string, mapId: MapId): NpcState {
+    const angle = Math.random() * Math.PI * 2;
+    const spd = WORLD.npcWanderSpeed;
+    const map = MAPS[mapId];
+    return this.baseNpcFields(
+      id,
+      mapId,
+      'streuner',
+      600 + Math.random() * (map.width - 1200),
+      600 + Math.random() * (map.height - 1200),
+      angle,
+      Math.cos(angle) * spd,
+      Math.sin(angle) * spd,
+    );
+  }
+
+  private makeCubikon(id: string, mapId: MapId): NpcState {
+    const { x, y } = bossSpawnPoint(mapId);
+    return this.baseNpcFields(id, mapId, 'cubikon', x, y, 0, 0, 0);
+  }
+
+  private makeProtegit(
+    id: string,
+    boss: NpcState,
+    orbitAngle: number,
+    orbitDist: number,
+  ): NpcState {
+    const x = boss.x + Math.cos(orbitAngle) * orbitDist;
+    const y = boss.y + Math.sin(orbitAngle) * orbitDist;
+    const m = this.baseNpcFields(
+      id,
+      boss.mapId,
+      'protegit',
+      x,
+      y,
+      orbitAngle,
+      0,
+      0,
+    );
+    m.parentId = boss.id;
+    m.orbitAngle = orbitAngle;
+    m.orbitDist = orbitDist;
+    m.aggroId = this.topCubikonDamager(boss) ?? boss.aggroId;
+    return m;
+  }
+
+  private pickNpcEngage(
+    npc: NpcState,
+    preyX: number,
+    preyY: number,
+    prefer: number = WORLD.npcPreferRange,
+  ) {
     const slack = WORLD.npcPreferSlack;
-    const prefer = WORLD.npcPreferRange;
     npc.engageDist = prefer * (1 - slack + Math.random() * slack * 2);
     npc.engageAngle = Math.random() * Math.PI * 2;
     npc.engageAnchorX = preyX;
@@ -1521,6 +1912,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   }
 
   private respawnNpc(npc: NpcState) {
+    if (npc.kind !== 'streuner') return;
     Object.assign(npc, this.makeNpc(npc.id, npc.mapId));
   }
 
@@ -1577,6 +1969,12 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     player.laserDamage = stats.laserDamage;
     player.laserNpcBonus = stats.laserNpcBonus;
     player.equippedLasers = stats.equippedLasers;
+    player.droidCount = Math.max(
+      0,
+      Math.min(MAX_DROIDS, Math.floor(player.loadout.droidCount ?? 0)),
+    );
+    player.loadout.droidCount = player.droidCount;
+    ensureDroidFits(player.loadout);
     player.shieldAbsorb = stats.shieldAbsorb;
     player.shipSprite = stats.sprite;
     player.hp = Math.min(player.hp, player.maxHp);

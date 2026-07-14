@@ -137,6 +137,8 @@ export interface PlayerState {
   laserNpcBonus: number;
   /** Equipped laser count — 0 means cannot fire lasers */
   equippedLasers: number;
+  /** Escort droids following the ship (0–8) */
+  droidCount: number;
   /** 0–100 shield absorption from generators */
   shieldAbsorb: number;
   /** Full hangar depot + per-ship fits */
@@ -189,11 +191,14 @@ export interface BulletState {
 export interface NpcState {
   id: string;
   name: string;
+  kind: import('./npc-catalog').NpcKind;
   mapId: MapId;
   x: number;
   y: number;
   angle: number;
   hp: number;
+  maxHp: number;
+  npcSprite: string;
   vx: number;
   vy: number;
   lastShotAt: number;
@@ -201,13 +206,24 @@ export interface NpcState {
   /** Player id being chased; null = wandering */
   aggroId: string | null;
   nextWanderAt: number;
-  /** Angle from prey to preferred hold spot (0 = needs pick) */
   engageAngle: number;
-  /** Distance from prey for hold spot */
   engageDist: number;
-  /** Prey position when engageAngle/Dist were last chosen */
   engageAnchorX: number;
   engageAnchorY: number;
+  /** Boss respawn timestamp while dead (0 = alive) */
+  respawnAt: number;
+  /** Protegit → cubikon id */
+  parentId: string | null;
+  /** Cubikon counter-attack mode */
+  enraged: boolean;
+  /** Orbit slot for protegits */
+  orbitAngle: number;
+  orbitDist: number;
+  /** When set, protegit is removed after this time */
+  minionDespawnAt: number;
+  /** Cubikon: damage tally per player for protegit targeting */
+  damageByPlayer: Record<string, number>;
+  minionsSpawned: boolean;
 }
 
 export interface CargoBox {
@@ -247,7 +263,23 @@ export interface Snapshot {
   >;
   npcs: Omit<
     NpcState,
-    'vx' | 'vy' | 'lastShotAt' | 'lastDpsAt' | 'aggroId' | 'nextWanderAt' | 'engageAngle' | 'engageDist' | 'engageAnchorX' | 'engageAnchorY'
+    | 'vx'
+    | 'vy'
+    | 'lastShotAt'
+    | 'lastDpsAt'
+    | 'aggroId'
+    | 'nextWanderAt'
+    | 'engageAngle'
+    | 'engageDist'
+    | 'engageAnchorX'
+    | 'engageAnchorY'
+    | 'respawnAt'
+    | 'parentId'
+    | 'orbitAngle'
+    | 'orbitDist'
+    | 'minionDespawnAt'
+    | 'damageByPlayer'
+    | 'minionsSpawned'
   >[];
   cargo: CargoBox[];
   portals: Array<(typeof PORTALS)[number]>;

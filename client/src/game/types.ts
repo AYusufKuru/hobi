@@ -71,6 +71,7 @@ export interface PlayerPublic {
   laserNpcBonus?: number;
   equippedLasers?: number;
   shipSprite: 'ship-player' | 'ship-elite' | 'ship-goliath';
+  droidCount?: number;
   color: string;
   targetId: string | null;
   firing: boolean;
@@ -94,10 +95,14 @@ export interface BulletPublic {
 export interface NpcPublic {
   id: string;
   name: string;
+  kind?: string;
   x: number;
   y: number;
   angle: number;
   hp: number;
+  maxHp?: number;
+  npcSprite?: string;
+  enraged?: boolean;
 }
 
 export interface CargoPublic {

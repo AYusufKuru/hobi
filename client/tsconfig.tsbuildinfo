@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/game/hangarpanel.tsx","./src/game/phasergame.tsx","./src/game/spacescene.ts","./src/game/socket.ts","./src/game/types.ts"],"version":"5.9.3"}

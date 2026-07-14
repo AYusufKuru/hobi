@@ -1,7 +1,17 @@
 import { useMemo, useRef, useState, type DragEvent } from 'react';
 import type { GameSocket } from './socket';
+import {
+  DROID_UI_CENTER,
+  DROID_UI_LEFT,
+  DROID_UI_RIGHT,
+} from './droidFormation';
 
-export type ShopCategory = 'ships' | 'lasers' | 'generators' | 'ammo';
+export type ShopCategory =
+  | 'ships'
+  | 'lasers'
+  | 'generators'
+  | 'ammo'
+  | 'droids';
 export type ShopCurrency = 'silver' | 'gold';
 
 export type ShopItem = {
@@ -30,6 +40,10 @@ export type ShipFit = {
   generators: (string | null)[];
 };
 
+export type DroidFit = {
+  slots: [string | null, string | null];
+};
+
 export type HangarLoadout = {
   version: 2;
   ships: string[];
@@ -41,6 +55,8 @@ export type HangarLoadout = {
   ammo?: Record<string, number>;
   activeAmmoId?: string;
   skillBar?: (string | null)[];
+  droidCount?: number;
+  droidFits?: DroidFit[];
 };
 
 export type HangarState = {
@@ -64,6 +80,7 @@ export type HangarState = {
     skillBar?: (string | null)[];
     laserSlots?: number;
     generatorSlots?: number;
+    droidCount?: number;
   };
 };
 
@@ -87,6 +104,13 @@ type DragPayload =
       from: 'ship';
       itemId: string;
       kind: 'laser' | 'generator';
+      slotIndex: number;
+    }
+  | {
+      from: 'droid';
+      itemId: string;
+      kind: 'laser' | 'generator';
+      droidIndex: number;
       slotIndex: number;
     };
 
@@ -119,6 +143,7 @@ const ITEM_ICON: Record<string, string> = {
   'ammo-x2': '/assets/hangar/ammo-ucb.png',
   'ammo-x3': '/assets/hangar/ammo-ucb.png',
   'ammo-x4': '/assets/hangar/ammo-ucb.png',
+  'droid-basic': '/assets/droid.png',
 };
 
 const SIDEBAR: { id: NavId | 'disabled'; label: string }[] = [
@@ -262,6 +287,32 @@ export default function HangarPanel({
     if (await applyResult(res)) onToast?.('Hangara alındı');
   }
 
+  async function equipDroidToSlot(
+    itemId: string,
+    droidIndex: number,
+    slotIndex: number,
+  ) {
+    setBusy(true);
+    const res = await emitAck<{ ok: boolean; error?: string; hangar?: HangarState }>(
+      socket,
+      'hangar:equipDroidSlot',
+      { droidIndex, slotIndex, itemId },
+    );
+    setBusy(false);
+    if (await applyResult(res)) onToast?.('Droid modülü takıldı');
+  }
+
+  async function unequipDroid(droidIndex: number, slotIndex: number) {
+    setBusy(true);
+    const res = await emitAck<{ ok: boolean; error?: string; hangar?: HangarState }>(
+      socket,
+      'hangar:unequipDroidSlot',
+      { droidIndex, slotIndex },
+    );
+    setBusy(false);
+    if (await applyResult(res)) onToast?.('Modül depoya alındı');
+  }
+
   function itemName(id: string) {
     return catalog.find((c) => c.id === id)?.name ?? id;
   }
@@ -345,6 +396,162 @@ export default function HangarPanel({
     }
   }
 
+  function moduleKind(id: string): 'laser' | 'generator' | null {
+    const cat = catalog.find((c) => c.id === id)?.category;
+    if (cat === 'lasers') return 'laser';
+    if (cat === 'generators') return 'generator';
+    return null;
+  }
+
+  function onDragStartDroidInv(
+    e: DragEvent,
+    itemId: string,
+    kind: 'laser' | 'generator',
+  ) {
+    onDragStartHangar(e, itemId, kind);
+  }
+
+  function onDragStartDroid(
+    e: DragEvent,
+    itemId: string,
+    kind: 'laser' | 'generator',
+    droidIndex: number,
+    slotIndex: number,
+  ) {
+    const payload: DragPayload = {
+      from: 'droid',
+      itemId,
+      kind,
+      droidIndex,
+      slotIndex,
+    };
+    dragRef.current = payload;
+    e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function isDroidShieldGen(id: string) {
+    const item = catalog.find((c) => c.id === id);
+    return (
+      item?.category === 'generators' &&
+      (item.shieldBonus ?? 0) > 0 &&
+      (item.speedBonus ?? 0) === 0
+    );
+  }
+
+  function isDroidModuleAllowed(id: string) {
+    const item = catalog.find((c) => c.id === id);
+    if (!item) return false;
+    if (item.category === 'lasers') return true;
+    return isDroidShieldGen(id);
+  }
+
+  async function onDropDroidSlot(
+    e: DragEvent,
+    droidIndex: number,
+    slotIndex: number,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const data = readDrag(e);
+    clearDrag();
+    if (!data || busy) return;
+    if (!isDroidModuleAllowed(data.itemId)) {
+      onToast?.('Droidlere hız jeneratörü takılamaz — sadece lazer veya kalkan');
+      return;
+    }
+    if (data.from === 'hangar') {
+      await equipDroidToSlot(data.itemId, droidIndex, slotIndex);
+      return;
+    }
+    if (data.from === 'droid') {
+      if (data.droidIndex === droidIndex && data.slotIndex === slotIndex) {
+        return;
+      }
+      setBusy(true);
+      await emitAck(socket, 'hangar:unequipDroidSlot', {
+        droidIndex: data.droidIndex,
+        slotIndex: data.slotIndex,
+      });
+      const res = await emitAck<{
+        ok: boolean;
+        error?: string;
+        hangar?: HangarState;
+      }>(socket, 'hangar:equipDroidSlot', {
+        droidIndex,
+        slotIndex,
+        itemId: data.itemId,
+      });
+      setBusy(false);
+      await applyResult(res);
+    }
+  }
+
+  async function onDropDroidInv(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const data = readDrag(e);
+    clearDrag();
+    if (!data || busy) return;
+    if (data.from === 'droid') {
+      await unequipDroid(data.droidIndex, data.slotIndex);
+    }
+  }
+
+  function renderDroidCard(droidIndex: number, areaClass?: string) {
+    const owned = droidIndex < (loadout?.droidCount ?? 0);
+    const fit = loadout?.droidFits?.[droidIndex];
+    const key = `droid-${droidIndex}`;
+
+    if (!owned) {
+      return (
+        <div key={key} className={`droid-card empty ${areaClass ?? ''}`}>
+          <span className="empty-mark">—</span>
+        </div>
+      );
+    }
+
+    return (
+      <div key={key} className={`droid-card ${areaClass ?? ''}`}>
+        <div className="droid-card-body">
+          <img src="/assets/droid.png" alt="" draggable={false} />
+        </div>
+        <div className="droid-mod-slots">
+          {[0, 1].map((si) => {
+            const modId = fit?.slots?.[si] ?? null;
+            const slotKey = `${key}-s${si}`;
+            return (
+              <div
+                key={slotKey}
+                className={`do-slot droid-mod ${modId ? 'filled' : 'empty'} ${
+                  dragOver === slotKey ? 'drop-target' : ''
+                }`}
+                draggable={!!modId && !busy}
+                title={modId ? itemName(modId) : 'Lazer / kalkan'}
+                onDragStart={(e) => {
+                  if (!modId) return;
+                  const kind = moduleKind(modId);
+                  if (!kind) return;
+                  onDragStartDroid(e, modId, kind, droidIndex, si);
+                }}
+                onDragEnd={clearDrag}
+                onDragOver={(ev) => allowDrop(ev, slotKey)}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={(ev) => void onDropDroidSlot(ev, droidIndex, si)}
+              >
+                {modId ? (
+                  <img src={iconFor(modId)} alt="" draggable={false} />
+                ) : (
+                  <span className="empty-mark">+</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   async function onDropHangar(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -417,7 +624,7 @@ export default function HangarPanel({
                   className={equipTab === 'droid' ? 'active' : ''}
                   onClick={() => setEquipTab('droid')}
                 >
-                  DİROİT
+                  DROID
                 </button>
               </div>
             )}
@@ -458,12 +665,13 @@ export default function HangarPanel({
             {nav === 'market' && (
               <div className="do-market">
                 <div className="do-subtabs">
-                  {(
+                  {                    (
                     [
                       ['ships', 'Gemiler'],
                       ['lasers', 'Lazerler'],
                       ['generators', 'Jeneratör'],
                       ['ammo', 'Cephane'],
+                      ['droids', 'Droid'],
                     ] as const
                   ).map(([id, label]) => (
                     <button
@@ -481,12 +689,15 @@ export default function HangarPanel({
                     const ownedShip =
                       item.category === 'ships' &&
                       loadout?.ships.includes(item.id);
+                    const droidFull =
+                      item.category === 'droids' &&
+                      (loadout?.droidCount ?? 0) >= 8;
                     return (
                       <button
                         key={item.id}
                         type="button"
                         className="do-item-card"
-                        disabled={busy || !!ownedShip}
+                        disabled={busy || !!ownedShip || droidFull}
                         onClick={() => void buy(item.id)}
                       >
                         <img src={iconFor(item.id)} alt="" />
@@ -494,9 +705,15 @@ export default function HangarPanel({
                         <span className="qty">
                           {ownedShip
                             ? 'SAHİP'
-                            : `${item.price} ${
-                                item.currency === 'gold' ? 'altın' : 'gümüş'
-                              }`}
+                            : droidFull
+                              ? 'MAX 8'
+                              : item.category === 'droids'
+                                ? `${loadout?.droidCount ?? 0}/8 · ${item.price} ${
+                                    item.currency === 'gold' ? 'altın' : 'gümüş'
+                                  }`
+                                : `${item.price} ${
+                                    item.currency === 'gold' ? 'altın' : 'gümüş'
+                                  }`}
                         </span>
                       </button>
                     );
@@ -547,17 +764,106 @@ export default function HangarPanel({
             )}
 
             {nav === 'equip' && equipTab === 'droid' && (
-              <div className="do-panel">
-                <h3>Diroitler</h3>
-                <p className="do-hint">
-                  Diroit sistemi yakında — şimdilik gemi ekipmanını kullan.
-                </p>
-                <div className="do-equip-grid hangar">
-                  {Array.from({ length: 12 }).map((_, i) => (
-                    <div key={i} className="do-slot empty">
-                      <span className="empty-mark">+</span>
+              <div className="do-droid-layout">
+                <div className="do-droid-main">
+                  <h3>Droidler ({loadout?.droidCount ?? 0}/8)</h3>
+                  <p className="do-hint">
+                    Her droidde 2 modül (lazer veya kalkan jeneratörü). Takılan
+                    modüller gemi statlarına eklenir.
+                  </p>
+                  <div className="do-droid-stage">
+                    <div className="droid-cluster left">
+                      {DROID_UI_LEFT.map((idx, pos) =>
+                        renderDroidCard(
+                          idx,
+                          pos === 0 ? 'droid-lead' : pos === 1 ? 'droid-top' : 'droid-bot',
+                        ),
+                      )}
                     </div>
-                  ))}
+                    <div className="droid-back-center">
+                      {DROID_UI_CENTER.map((idx) => renderDroidCard(idx))}
+                    </div>
+                    <div className="droid-cluster right">
+                      {DROID_UI_RIGHT.map((idx, pos) =>
+                        renderDroidCard(
+                          idx,
+                          pos === 0 ? 'droid-lead' : pos === 1 ? 'droid-top' : 'droid-bot',
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className={`do-panel do-hangar-inv ${
+                    dragOver === 'droid-inv' ? 'drop-target' : ''
+                  }`}
+                  onDragOver={(e) => allowDrop(e, 'droid-inv')}
+                  onDragLeave={() => setDragOver(null)}
+                  onDrop={(e) => void onDropDroidInv(e)}
+                >
+                  <h3>Sahip olduklarım</h3>
+
+                  <div className="do-inv-section">
+                    <h4>Lazer</h4>
+                    <div className="do-equip-grid hangar">
+                      {depotItems.filter((d) => d.kind === 'laser').length ===
+                        0 && <div className="do-empty tiny">Lazer yok</div>}
+                      {depotItems
+                        .filter((d) => d.kind === 'laser')
+                        .map(({ id, n, kind }) => (
+                          <div
+                            key={id}
+                            className="do-slot filled"
+                            draggable={!busy}
+                            title={`${itemName(id)} ×${n}`}
+                            onDragStart={(e) =>
+                              onDragStartDroidInv(e, id, kind)
+                            }
+                            onDragEnd={clearDrag}
+                          >
+                            <img src={iconFor(id)} alt="" draggable={false} />
+                            {n > 1 && <span className="stack">{n}</span>}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+
+                  <div className="do-inv-section">
+                    <h4>Kalkan (jeneratör)</h4>
+                    <div className="do-equip-grid hangar">
+                      {depotItems.filter(
+                        (d) => d.kind === 'generator' && isDroidShieldGen(d.id),
+                      ).length === 0 && (
+                        <div className="do-empty tiny">Kalkan jeneratörü yok</div>
+                      )}
+                      {depotItems
+                        .filter(
+                          (d) =>
+                            d.kind === 'generator' && isDroidShieldGen(d.id),
+                        )
+                        .map(({ id, n, kind }) => (
+                          <div
+                            key={id}
+                            className="do-slot filled"
+                            draggable={!busy}
+                            title={`${itemName(id)} ×${n}`}
+                            onDragStart={(e) =>
+                              onDragStartDroidInv(e, id, kind)
+                            }
+                            onDragEnd={clearDrag}
+                          >
+                            <img src={iconFor(id)} alt="" draggable={false} />
+                            {n > 1 && <span className="stack">{n}</span>}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+
+                  <p className="do-hint">
+                    Gemi hangarıyla aynı modüller — hız jeneratörü droidlere
+                    takılamaz.
+                  </p>
                 </div>
               </div>
             )}

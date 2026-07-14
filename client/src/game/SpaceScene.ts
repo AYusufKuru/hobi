@@ -7,6 +7,7 @@ import type {
   Snapshot,
   WorldConfig,
 } from './types';
+import { droidLocalOffset, MAX_DROIDS } from './droidFormation';
 
 export type SceneHud = {
   onStats?: (stats: {
@@ -35,6 +36,7 @@ type ShipGfx = {
   thrust: Phaser.GameObjects.Particles.ParticleEmitter;
   label: Phaser.GameObjects.Text;
   hp: Phaser.GameObjects.Graphics;
+  droids: Phaser.GameObjects.Image[];
   lastHp: number;
   renderX: number;
   renderY: number;
@@ -47,6 +49,9 @@ type NpcGfx = {
   glow: Phaser.GameObjects.Image;
   label: Phaser.GameObjects.Text;
   hp: Phaser.GameObjects.Graphics;
+  spriteKey: string;
+  barW: number;
+  labelY: number;
   lastHp: number;
   renderX: number;
   renderY: number;
@@ -111,6 +116,12 @@ export class SpaceScene extends Phaser.Scene {
   private cursorGfx!: Phaser.GameObjects.Graphics;
   private ctrlKey!: Phaser.Input.Keyboard.Key;
   private spaceKey!: Phaser.Input.Keyboard.Key;
+  private combatHotkeyListener = (ev: Event) => {
+    const action = (ev as CustomEvent<{ action?: 'start' | 'stop' }>).detail
+      ?.action;
+    if (action === 'start') this.startFire();
+    else if (action === 'stop') this.stopFire(false);
+  };
 
   constructor() {
     super('SpaceScene');
@@ -136,6 +147,10 @@ export class SpaceScene extends Phaser.Scene {
     this.load.image('ship-elite', '/assets/ship-elite.png');
     this.load.image('ship-goliath', '/assets/ship-goliath.png');
     this.load.image('ship-npc', '/assets/ship-npc.png');
+    this.load.image('cubikon-idle', '/assets/cubikon-idle.png');
+    this.load.image('cubikon-angry', '/assets/cubikon-angry.png');
+    this.load.image('protegit', '/assets/protegit.png');
+    this.load.image('droid', '/assets/droid.png');
     this.load.image('bullet', '/assets/bullet-cyan.png');
     this.load.image('explosion', '/assets/explosion.png');
   }
@@ -165,6 +180,11 @@ export class SpaceScene extends Phaser.Scene {
     this.spaceKey = this.input.keyboard!.addKey(
       Phaser.Input.Keyboard.KeyCodes.SPACE,
     );
+
+    window.addEventListener('govorbit:combat', this.combatHotkeyListener);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('govorbit:combat', this.combatHotkeyListener);
+    });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!pointer.leftButtonDown()) return;
@@ -516,7 +536,13 @@ export class SpaceScene extends Phaser.Scene {
     );
   }
 
+  /** Ctrl: toggle. clearLock=true on cease (Ctrl off) so tracking stops. */
   private toggleFire() {
+    if (this.firing) this.stopFire(true);
+    else this.startFire();
+  }
+
+  private startFire() {
     if (Date.now() < this.deadUntil) return;
     if (!this.targetId) {
       this.hud.onToast?.('Önce bir hedef seç (çift tık veya sol tık)');
@@ -528,13 +554,20 @@ export class SpaceScene extends Phaser.Scene {
       this.firing = false;
       return;
     }
-    this.firing = !this.firing;
-    if (!this.firing) {
-      // Stop fire also clears lock so ship stops tracking the target
+    if (this.firing) return;
+    this.firing = true;
+    this.hud.onToast?.('ATEŞ AÇILDI');
+    this.time.delayedCall(800, () => this.hud.onToast?.(null));
+  }
+
+  private stopFire(clearLock: boolean) {
+    if (!this.firing && !clearLock) return;
+    this.firing = false;
+    if (clearLock) {
       this.targetId = null;
       this.hud.onToast?.('Ateş kapandı · kilit kalktı');
     } else {
-      this.hud.onToast?.('ATEŞ AÇILDI');
+      this.hud.onToast?.('Ateş kapandı');
     }
     this.time.delayedCall(800, () => this.hud.onToast?.(null));
   }
@@ -831,6 +864,7 @@ export class SpaceScene extends Phaser.Scene {
       const shipRot = gfx.renderAngle + SHIP_ANGLE_OFFSET;
       gfx.sprite.setRotation(shipRot);
       gfx.glow.setRotation(shipRot);
+      this.layoutShipDroids(gfx, p.droidCount ?? 0, p.hp > 0);
       gfx.label.setPosition(0, 42);
       gfx.label.setRotation(0);
       gfx.label.setColor('#ffffff');
@@ -868,17 +902,25 @@ export class SpaceScene extends Phaser.Scene {
       const npcRot = gfx.renderAngle + SHIP_ANGLE_OFFSET;
       gfx.sprite.setRotation(npcRot);
       gfx.glow.setRotation(npcRot);
-      gfx.label.setPosition(0, 38);
+      gfx.label.setPosition(0, gfx.labelY);
       gfx.label.setRotation(0);
-      gfx.glow.setAlpha(0.3 + Math.sin(this.time.now / 200 + n.x) * 0.1);
+      const isBossKind = n.kind === 'cubikon' || n.kind === 'protegit';
+      gfx.glow.setAlpha(
+        isBossKind ? 0 : 0.3 + Math.sin(this.time.now / 200 + n.x) * 0.1,
+      );
 
       gfx.hp.clear();
       gfx.hp.setRotation(0);
-      const ratio = Math.max(0, n.hp / this.world.npcHp);
+      const maxHp = n.maxHp ?? this.world.npcHp;
+      const ratio = Math.max(0, n.hp / Math.max(1, maxHp));
+      const bw = gfx.barW;
       gfx.hp.fillStyle(0x000000, 0.5);
-      gfx.hp.fillRoundedRect(-28, -40, 56, 3, 1);
-      gfx.hp.fillStyle(0xff6b4a, 1);
-      gfx.hp.fillRoundedRect(-28, -40, 56 * ratio, 3, 1);
+      gfx.hp.fillRoundedRect(-bw / 2, -gfx.labelY - 6, bw, 3, 1);
+      gfx.hp.fillStyle(
+        n.kind === 'cubikon' ? 0xffaa33 : n.kind === 'protegit' ? 0xff4444 : 0xff6b4a,
+        1,
+      );
+      gfx.hp.fillRoundedRect(-bw / 2, -gfx.labelY - 6, bw * ratio, 3, 1);
     }
 
     const laserSpeed = this.world.bulletSpeed || 980;
@@ -1066,6 +1108,44 @@ export class SpaceScene extends Phaser.Scene {
     }
   }
 
+  private syncShipDroids(gfx: ShipGfx, count: number) {
+    const n = Math.max(0, Math.min(MAX_DROIDS, Math.floor(count)));
+    while (gfx.droids.length < n) {
+      const img = this.add
+        .image(0, 0, 'droid')
+        .setDisplaySize(28, 28)
+        .setOrigin(0.5);
+      // Behind ship hull/glow
+      gfx.root.addAt(img, 0);
+      gfx.droids.push(img);
+    }
+    while (gfx.droids.length > n) {
+      const img = gfx.droids.pop();
+      if (img) {
+        gfx.root.remove(img, true);
+      }
+    }
+  }
+
+  private layoutShipDroids(gfx: ShipGfx, count: number, alive: boolean) {
+    const n = Math.max(0, Math.min(MAX_DROIDS, Math.floor(count)));
+    const cos = Math.cos(gfx.renderAngle);
+    const sin = Math.sin(gfx.renderAngle);
+    const shipRot = gfx.renderAngle + SHIP_ANGLE_OFFSET;
+    for (let i = 0; i < gfx.droids.length; i++) {
+      const img = gfx.droids[i];
+      if (i >= n || !alive) {
+        img.setVisible(false);
+        continue;
+      }
+      const local = droidLocalOffset(i);
+      img.setPosition(local.x * cos - local.y * sin, local.x * sin + local.y * cos);
+      img.setRotation(shipRot);
+      img.setVisible(true);
+      img.setAlpha(0.95);
+    }
+  }
+
   private upsertShip(player: PlayerPublic, instant: boolean) {
     let gfx = this.ships.get(player.id);
     const isSelf = player.id === this.selfId;
@@ -1119,6 +1199,7 @@ export class SpaceScene extends Phaser.Scene {
         thrust,
         label,
         hp,
+        droids: [],
         lastHp: player.hp,
         renderX: player.x,
         renderY: player.y,
@@ -1131,6 +1212,8 @@ export class SpaceScene extends Phaser.Scene {
       gfx.label.setY(size * 0.65);
     }
 
+    this.syncShipDroids(gfx, player.droidCount ?? 0);
+
     gfx.label.setText(player.name);
     if (instant) {
       gfx.renderX = player.x;
@@ -1141,22 +1224,71 @@ export class SpaceScene extends Phaser.Scene {
     gfx.lastHp = player.hp;
   }
 
+  private npcVisual(npc: NpcPublic) {
+    const kind = npc.kind ?? 'streuner';
+    if (kind === 'cubikon') {
+      const key =
+        npc.npcSprite ?? (npc.enraged ? 'cubikon-angry' : 'cubikon-idle');
+      const angry = key === 'cubikon-angry';
+      return {
+        key,
+        size: angry ? 160 : 140,
+        glow: 0,
+        glowTint: 0xff8800,
+        labelY: angry ? 88 : 78,
+        barW: 120,
+        depth: 9,
+        fontSize: '13px',
+        labelColor: '#ffcc66',
+        useGlow: false,
+      };
+    }
+    if (kind === 'protegit') {
+      return {
+        key: 'protegit',
+        size: 52,
+        glow: 0,
+        glowTint: 0xff3344,
+        labelY: 34,
+        barW: 52,
+        depth: 8,
+        fontSize: '10px',
+        labelColor: '#ff8888',
+        useGlow: false,
+      };
+    }
+    return {
+      key: 'ship-npc',
+      size: 56,
+      glow: 70,
+      glowTint: 0xff5533,
+      labelY: 38,
+      barW: 56,
+      depth: 8,
+      fontSize: '11px',
+      labelColor: '#ffffff',
+      useGlow: true,
+    };
+  }
+
   private upsertNpc(npc: NpcPublic, instant: boolean) {
+    const vis = this.npcVisual(npc);
     let gfx = this.npcs.get(npc.id);
     if (!gfx) {
-      const root = this.add.container(npc.x, npc.y).setDepth(8);
+      const root = this.add.container(npc.x, npc.y).setDepth(vis.depth);
       const glow = this.add
-        .image(0, 0, 'ship-npc')
-        .setDisplaySize(70, 70)
-        .setAlpha(0.4)
-        .setTint(0xff5533)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      const sprite = this.add.image(0, 0, 'ship-npc').setDisplaySize(56, 56);
+        .image(0, 0, vis.key)
+        .setDisplaySize(vis.glow || vis.size, vis.glow || vis.size)
+        .setAlpha(vis.useGlow ? 0.4 : 0)
+        .setTint(vis.glowTint)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setVisible(!!vis.useGlow);
+      const sprite = this.add.image(0, 0, vis.key).setDisplaySize(vis.size, vis.size);
       const label = this.add
-        .text(0, 38, npc.name || 'Streuner', {
+        .text(0, vis.labelY, npc.name || 'NPC', {
           fontFamily: 'Orbitron, sans-serif',
-          fontSize: '11px',
-          color: '#ffffff',
+          fontSize: vis.fontSize,
+          color: vis.labelColor,
           stroke: '#031018',
           strokeThickness: 3,
         })
@@ -1169,16 +1301,31 @@ export class SpaceScene extends Phaser.Scene {
         glow,
         label,
         hp,
+        spriteKey: vis.key,
+        barW: vis.barW,
+        labelY: vis.labelY,
         lastHp: npc.hp,
         renderX: npc.x,
         renderY: npc.y,
         renderAngle: npc.angle,
       };
       this.npcs.set(npc.id, gfx);
+    } else if (gfx.spriteKey !== vis.key) {
+      gfx.spriteKey = vis.key;
+      gfx.sprite.setTexture(vis.key).setDisplaySize(vis.size, vis.size);
+      if (vis.useGlow) {
+        gfx.glow.setTexture(vis.key).setDisplaySize(vis.glow, vis.glow).setVisible(true);
+      } else {
+        gfx.glow.setVisible(false);
+      }
+      gfx.barW = vis.barW;
+      gfx.labelY = vis.labelY;
+      gfx.label.setY(vis.labelY);
+      gfx.label.setFontSize(vis.fontSize);
+      gfx.label.setColor(vis.labelColor);
     }
 
-    gfx.label.setText(npc.name || 'Streuner');
-    gfx.label.setColor('#ffffff');
+    gfx.label.setText(npc.name || 'NPC');
     if (instant) {
       gfx.renderX = npc.x;
       gfx.renderY = npc.y;

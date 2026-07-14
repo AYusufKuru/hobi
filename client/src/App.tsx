@@ -256,6 +256,7 @@ export default function App() {
           socket={session.socket}
           selfId={session.self.id}
           hangar={hangar}
+          firing={stats.firing}
           onHangar={setHangar}
           onAmmo={(count) =>
             setStats((s) => ({

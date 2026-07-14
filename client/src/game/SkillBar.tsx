@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GameSocket } from './socket';
 import type { HangarState } from './HangarPanel';
 
@@ -25,21 +25,34 @@ type Props = {
   socket: GameSocket;
   selfId: string;
   hangar: HangarState | null;
+  firing?: boolean;
   onHangar: (h: HangarState) => void;
   onAmmo?: (count: number, activeId: string) => void;
   onToast?: (msg: string | null) => void;
 };
 
+function emitCombat(action: 'start' | 'stop') {
+  window.dispatchEvent(
+    new CustomEvent('govorbit:combat', { detail: { action } }),
+  );
+}
+
 export default function SkillBar({
   socket,
   selfId,
   hangar,
+  firing = false,
   onHangar,
   onAmmo,
   onToast,
 }: Props) {
   const [activeId, setActiveId] = useState('ammo-x1');
   const [ammoLive, setAmmoLive] = useState<Record<string, number>>({});
+  const activeIdRef = useRef(activeId);
+  const firingRef = useRef(firing);
+  activeIdRef.current = activeId;
+  firingRef.current = firing;
+
   const ammo = {
     ...(hangar?.stats?.ammo ?? hangar?.loadout?.ammo ?? {}),
     ...ammoLive,
@@ -63,7 +76,6 @@ export default function SkillBar({
         laserAmmo?: number;
       }>;
     }) => {
-      // Prefer any player ammo bag that matches our hangar active id update
       const self = snap.players?.find((p) => p.id === selfId);
       if (self?.ammo) {
         setAmmoLive(self.ammo);
@@ -100,7 +112,7 @@ export default function SkillBar({
         Numpad5: 'ammo-rsb',
       };
       const ammoId = map[e.code];
-      if (ammoId) void select(ammoId);
+      if (ammoId) void activateAmmo(ammoId);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -127,6 +139,16 @@ export default function SkillBar({
         },
       );
     });
+  }
+
+  /** Same laser again while firing → stop. Else select + start fire. */
+  async function activateAmmo(ammoId: string) {
+    if (activeIdRef.current === ammoId && firingRef.current) {
+      emitCombat('stop');
+      return;
+    }
+    await select(ammoId);
+    emitCombat('start');
   }
 
   async function assignSlot(slot: number, ammoId: string | null) {
@@ -167,8 +189,8 @@ export default function SkillBar({
             type="button"
             className={`skill-slot ${active ? 'active' : ''} ${count <= 0 ? 'empty' : ''}`}
             style={{ ['--ammo-color' as string]: meta.color }}
-            title={`${meta.label} · tıkla seç · sağ tık slotu boşalt`}
-            onClick={() => void select(ammoId)}
+            title={`${meta.label} · bas: ateş / aynı tuş: dur`}
+            onClick={() => void activateAmmo(ammoId)}
             onContextMenu={(e) => {
               e.preventDefault();
               void assignSlot(i, null);

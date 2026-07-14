@@ -195,4 +195,21 @@ export class GameGateway
   ) {
     return this.game.unequipSlot(client.id, body ?? {});
   }
+
+  @SubscribeMessage('hangar:equipDroidSlot')
+  handleEquipDroidSlot(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: { droidIndex?: number; slotIndex?: number; itemId?: string },
+  ) {
+    return this.game.equipDroidSlot(client.id, body ?? {});
+  }
+
+  @SubscribeMessage('hangar:unequipDroidSlot')
+  handleUnequipDroidSlot(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { droidIndex?: number; slotIndex?: number },
+  ) {
+    return this.game.unequipDroidSlot(client.id, body ?? {});
+  }
 }
