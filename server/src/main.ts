@@ -13,7 +13,10 @@ async function bootstrap() {
   });
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);
-  console.log(`GovOrbit server listening on http://localhost:${port}`);
+  const dbMode = process.env.DATABASE_URL
+    ? 'postgres (DATABASE_URL)'
+    : (process.env.DB_TYPE ?? 'sqlite');
+  console.log(`GovOrbit server listening on http://localhost:${port} · db=${dbMode}`);
 }
 
 bootstrap();

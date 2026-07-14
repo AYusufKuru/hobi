@@ -2,23 +2,15 @@
 
 DarkOrbit tarzı çok oyunculu uzay demosu.
 
-**Stack:** React + Phaser 3 · NestJS · Socket.io · TypeORM (SQLite varsayılan / PostgreSQL opsiyonel)
+**Stack:** React + Phaser 3 · NestJS · Socket.io · TypeORM (SQLite yerel / PostgreSQL üretim)
 
-## DarkOrbit notu
+## Neden SQLite üretimde yetmez?
 
-Orijinal DarkOrbit kaynak kodu Bigpoint’a aittir ve buraya kopyalanamaz.
-Bu demo, resmi Controls FAQ / wiki’deki herkese açık mekaniklerden esinlenen **özgün** bir implementasyondur. Ayrıntı: `LEGAL.md`.
+SQLite dosyası sunucu diskinde durur. Render / Railway gibi platformlarda disk **ephemeral** olduğu için her deploy’da dosya silinir → kayıtlar, kredi, hangar kaybolur.
 
-## Özellikler (DO tarzı)
+Üretimde **managed PostgreSQL** kullan (Neon, Supabase, Render Postgres…). Sunucuya sadece `DATABASE_URL` ver.
 
-- WASD yok: tıkla git + basılı tutarak sür
-- Hedef seç + **Ctrl** lazer / **çift tık** ile ateş başlat
-- **Space** roket
-- Kalkan + HP, lazer menzili
-- Minimap (tıkla git)
-- Jump portal, kargo kutusu, harita kenarı radyasyon
-
-## Hızlı başlangıç (SQLite)
+## Hızlı başlangıç (SQLite — sadece lokal)
 
 PostgreSQL veya Docker gerekmez; demo hemen çalışır.
 
@@ -30,17 +22,25 @@ npm run dev
 - İstemci: http://localhost:5173
 - Sunucu: http://localhost:3001
 
-İki tarayıcı penceresi açıp farklı isimlerle girerek multiplayer’ı test edebilirsin.
+## Üretim: kalıcı Postgres (önerilen)
 
-## PostgreSQL ile çalıştırma
+1. [Neon](https://neon.tech) (ücretsiz) veya Supabase’de proje aç → connection string kopyala.
+2. Oyun sunucusunun (Render vb.) Environment değişkenlerine ekle:
 
-1. Postgres ayağa kaldır (Docker varsa):
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+CORS_ORIGIN=https://SENIN-VERCEL-URL.vercel.app
+```
+
+3. Redeploy et. `DATABASE_URL` varsa SQLite kullanılmaz; hesaplar deploy’lar arasında kalır.
+
+Lokal Postgres (Docker):
 
 ```bash
 docker compose up -d
 ```
 
-2. `server/.env` oluştur:
+`server/.env`:
 
 ```env
 PORT=3001
@@ -52,30 +52,28 @@ DB_PASSWORD=govorbit
 DB_NAME=govorbit
 ```
 
-3. `npm run dev`
+veya:
+
+```env
+DATABASE_URL=postgresql://govorbit:govorbit@localhost:5432/govorbit
+DB_SSL=false
+```
 
 ## Kontroller
 
 | Tuş | Aksiyon |
 |-----|---------|
-| W A S D | Hareket |
-| Fare | Nişan |
-| Sol tık | Ateş |
+| Sol tık | Git / hedef |
+| Çift tık | Hedef + lazer |
+| Ctrl | Lazer |
+| Space | Roket |
 
 ## Mimari
 
 ```
-client/          React (Vite) + Phaser canvas
-server/          NestJS + GameGateway (Socket.io) + GameService (simülasyon)
-docker-compose   PostgreSQL 16
+client/          React (Vite) + Phaser canvas  → Vercel
+server/          NestJS + Socket.io            → Render / Railway / VPS
+postgres         Neon / Supabase / Docker      → kalıcı oyuncu verisi
 ```
 
 Sunucu otoriterdir: hareket, mermi ve çarpışmalar sunucuda hesaplanır; istemci input gönderir ve snapshot çizer.
-
-## Sonraki adımlar (fikir)
-
-- Harita odaları / jump gate
-- Gemi yükseltmeleri ve envanter
-- Auth (JWT) + güvenli hesap
-- Client-side prediction / reconciliation
-- Daha zengin sprite / efekt katmanı
